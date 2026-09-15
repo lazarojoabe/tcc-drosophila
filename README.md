@@ -20,6 +20,7 @@ As pastas intermediárias antigas e as imagens não utilizadas diretamente foram
 ```text
 python src/pipeline_melhorado.py --verbose
 python src/comparar_resultados.py
+python src/tabela_comparativa.py
 ```
 
 Por padrão, o pipeline gera apenas arquivos tabulares e não cria imagens intermediárias. Para gerar máscaras e overlays de controle de qualidade:
@@ -35,3 +36,5 @@ python -m unittest discover -s tests -v
 ```
 
 As alterações estão documentadas em [docs/MELHORIAS_TCC.md](docs/MELHORIAS_TCC.md). O comparativo detalhado, com roteiro para apresentação, está em [docs/COMPARATIVO_IC_VS_TCC.md](docs/COMPARATIVO_IC_VS_TCC.md).
+
+Para uma tabela simples, própria para mostrar ao orientador, execute `python src/tabela_comparativa.py`. Ela gera `results/tabela_media_proteina_ic_vs_tcc.csv` e `results/tabela_media_proteina_ic_vs_tcc.md`.
