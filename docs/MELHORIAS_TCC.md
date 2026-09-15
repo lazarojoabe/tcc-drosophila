@@ -30,7 +30,7 @@ Para cada núcleo são calculados área, média, mediana, desvio-padrão, intens
 
 O resultado está em `results/resultados_por_nucleo.csv`. A média por amostra é calculada a partir das médias dos núcleos, sem misturar todos os contornos em uma única lista.
 
-### 5. Correção local de fundo
+### 5. Correção de fundo por amostra
 
 Por padrão, é utilizada uma faixa externa de 20 pixels da imagem como referência global de fundo por amostra. Essa escolha evita que um anel local ao redor do núcleo capture sinal citoplasmático ou outras estruturas da larva. Se a faixa não tiver pixels suficientes, o pipeline usa como fallback todos os pixels fora dos núcleos. O valor não é truncado em zero, pois valores negativos são úteis para identificar amostras em que o sinal não se diferencia do fundo.
 
@@ -40,13 +40,19 @@ O pipeline verifica leitura das imagens, compatibilidade de dimensões, existên
 
 ### 7. Reprodutibilidade
 
-Os parâmetros utilizados são salvos em `configuracao.json`. O processamento pode ser executado pela linha de comando e gera resultados tabulares, manifesto e imagens de controle de qualidade.
+Os parâmetros utilizados são salvos em `configuracao.json`. O processamento pode ser executado pela linha de comando e gera resultados tabulares, manifesto e configuração. Imagens de controle de qualidade são opcionais para evitar poluir o repositório.
 
 ## Execução
 
 ```text
 python src/pipeline_melhorado.py --verbose
 python src/comparar_resultados.py
+```
+
+Para gerar máscaras e overlays de controle visual sob demanda:
+
+```text
+python src/pipeline_melhorado.py --save-images
 ```
 
 Parâmetros úteis:
@@ -63,8 +69,8 @@ python src/pipeline_melhorado.py --min-nucleus-area 100 --background-border-widt
 - `results/comparativo_amostras.csv`: comparação amostra a amostra.
 - `results/comparativo_resultados.md`: resumo textual da comparação.
 - `results/comparativo_resumo.json`: estatísticas numéricas da comparação.
-- `results/mascaras_melhoradas/`: máscaras binárias por amostra.
-- `results/overlays_melhorados/`: imagens para inspeção visual.
+- `results/mascaras_melhoradas/`: máscaras binárias por amostra, somente com `--save-images`.
+- `results/overlays_melhorados/`: imagens para inspeção visual, somente com `--save-images`.
 
 ## Testes
 

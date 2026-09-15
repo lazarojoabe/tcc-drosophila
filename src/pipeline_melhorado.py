@@ -162,6 +162,7 @@ def measure_sample(
     pair: SamplePair,
     config: PipelineConfig,
     output_dir: Path,
+    save_images: bool = False,
 ) -> tuple[list[dict], dict]:
     if pair.nucleus_path is None or pair.protein_path is None:
         return [], {
@@ -231,19 +232,28 @@ def measure_sample(
             "otsu_threshold": threshold,
         }
 
-    mask_dir = output_dir / "mascaras_melhoradas"
-    overlay_dir = output_dir / "overlays_melhorados"
-    mask_dir.mkdir(parents=True, exist_ok=True)
-    overlay_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = re.sub(r"[^A-Za-z0-9_.+-]", "_", pair.key)
-    if not cv2.imwrite(str(mask_dir / f"{safe_name}.png"), mask):
-        raise IOError(f"Falha ao gravar máscara de {pair.key}")
-    normalized = cv2.normalize(np.clip(protein_signal, 0, 255).astype(np.uint8), None, 0, 255, cv2.NORM_MINMAX)
-    overlay = cv2.cvtColor(normalized, cv2.COLOR_GRAY2BGR)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(overlay, contours, -1, (0, 255, 0), 1)
-    if not cv2.imwrite(str(overlay_dir / f"{safe_name}.png"), overlay):
-        raise IOError(f"Falha ao gravar overlay de {pair.key}")
+    if save_images:
+        mask_dir = output_dir / "mascaras_melhoradas"
+        overlay_dir = output_dir / "overlays_melhorados"
+        mask_dir.mkdir(parents=True, exist_ok=True)
+        overlay_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^A-Za-z0-9_.+-]", "_", pair.key)
+        if not cv2.imwrite(str(mask_dir / f"{safe_name}.png"), mask):
+            raise IOError(f"Falha ao gravar máscara de {pair.key}")
+        normalized = cv2.normalize(
+            np.clip(protein_signal, 0, 255).astype(np.uint8),
+            None,
+            0,
+            255,
+            cv2.NORM_MINMAX,
+        )
+        overlay = cv2.cvtColor(normalized, cv2.COLOR_GRAY2BGR)
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        cv2.drawContours(overlay, contours, -1, (0, 255, 0), 1)
+        if not cv2.imwrite(str(overlay_dir / f"{safe_name}.png"), overlay):
+            raise IOError(f"Falha ao gravar overlay de {pair.key}")
     return rows, summary
 
 
@@ -260,6 +270,7 @@ def run_pipeline(
     protein_dir: Path,
     output_dir: Path,
     config: PipelineConfig,
+    save_images: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     pairs = build_manifest(nucleus_dir, protein_dir)
     manifest_rows = [
@@ -281,7 +292,7 @@ def run_pipeline(
     summaries: list[dict] = []
     for index, pair in enumerate(pairs, start=1):
         LOGGER.info("Processando %d/%d: %s", index, len(pairs), pair.key)
-        rows, summary = measure_sample(pair, config, output_dir)
+        rows, summary = measure_sample(pair, config, output_dir, save_images)
         all_rows.extend(rows)
         summaries.append(summary)
 
@@ -326,6 +337,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     parser.add_argument("--min-nucleus-area", type=int, default=100)
     parser.add_argument("--background-border-width", type=int, default=20)
+    parser.add_argument(
+        "--save-images",
+        action="store_true",
+        help="salva máscaras e overlays de controle de qualidade",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -337,7 +353,13 @@ def main() -> None:
         min_nucleus_area=args.min_nucleus_area,
         background_border_width=args.background_border_width,
     )
-    run_pipeline(args.nuclei_dir, args.protein_dir, args.output_dir, config)
+    run_pipeline(
+        args.nuclei_dir,
+        args.protein_dir,
+        args.output_dir,
+        config,
+        save_images=args.save_images,
+    )
     LOGGER.warning("Resultados gravados em %s", args.output_dir)
 
 
