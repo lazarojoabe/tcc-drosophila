@@ -1,8 +1,3 @@
-"""Pipeline reproduzível para segmentação nuclear e quantificação de proteína.
-
-Esta implementação é mantida separada dos scripts originais para permitir uma
-comparação auditável entre o método da iniciação científica e o método revisado.
-"""
 
 from __future__ import annotations
 
@@ -95,11 +90,6 @@ def _odd(value: int) -> int:
 
 
 def segment_nuclei(signal: np.ndarray, config: PipelineConfig) -> tuple[np.ndarray, np.ndarray, float]:
-    """Segmenta núcleos e retorna (labels, máscara, threshold de Otsu).
-
-    A máscara permanece monocanal. Sobreposições coloridas são geradas apenas
-    para controle visual, nunca usadas para medir intensidade.
-    """
 
     image = np.clip(signal, 0, 255).astype(np.uint8)
     blurred = cv2.GaussianBlur(

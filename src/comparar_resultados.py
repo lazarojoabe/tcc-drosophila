@@ -1,4 +1,3 @@
-"""Compara o método original com o pipeline_melhorado.py."""
 
 from __future__ import annotations
 
@@ -37,6 +36,8 @@ def legacy_measurement(filled_path: Path, protein_path: Path) -> dict:
             "legacy_boundary_points": 0,
             "legacy_mean_gray_boundary": float("nan"),
             "legacy_mean_red_boundary": float("nan"),
+            "legacy_std_gray_boundary": float("nan"),
+            "legacy_std_red_boundary": float("nan"),
         }
     gray_values = np.array([protein_gray[y, x] for x, y in coordinates], dtype=float)
     red_values = np.array([protein_raw[y, x] for x, y in coordinates], dtype=float)
@@ -45,6 +46,8 @@ def legacy_measurement(filled_path: Path, protein_path: Path) -> dict:
         "legacy_boundary_points": len(coordinates),
         "legacy_mean_gray_boundary": float(gray_values.mean()),
         "legacy_mean_red_boundary": float(red_values.mean()),
+        "legacy_std_gray_boundary": float(gray_values.std()),
+        "legacy_std_red_boundary": float(red_values.std()),
     }
 
 
@@ -94,12 +97,16 @@ def main() -> None:
                 "legacy_boundary_points": baseline.get("legacy_boundary_points", ""),
                 "legacy_mean_gray_boundary": baseline.get("legacy_mean_gray_boundary", ""),
                 "legacy_mean_red_boundary": baseline.get("legacy_mean_red_boundary", ""),
+                "legacy_std_gray_boundary": baseline.get("legacy_std_gray_boundary", ""),
+                "legacy_std_red_boundary": baseline.get("legacy_std_red_boundary", ""),
                 "improved_nucleus_count": summary.get("nucleus_count", ""),
                 "improved_area_total_px": summary.get("area_total_px", ""),
                 "improved_mean_raw_red_per_nucleus": summary.get("mean_raw_red_per_nucleus", ""),
                 "improved_mean_background_corrected_red_per_nucleus": summary.get(
                     "mean_background_corrected_red_per_nucleus", ""
                 ),
+                "improved_std_raw_red_per_nucleus": float(np.std([float(item["signal_mean_raw"]) for item in nucleus_rows])) if nucleus_rows else "",
+                "improved_std_background_corrected_red_per_nucleus": float(np.std([float(item["signal_mean_background_corrected"]) for item in nucleus_rows])) if nucleus_rows else "",
             }
         )
 
