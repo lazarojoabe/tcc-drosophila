@@ -19,7 +19,11 @@ class ProcessingTests(unittest.TestCase):
         self.protein[self.nucleus > 0] = 1300
 
     def test_metrics_preserve_16_bit_protein_values(self) -> None:
-        result = process_arrays(self.nucleus, self.protein, SegmentationConfig(min_nucleus_area=30, protein_channel=0))
+        result = process_arrays(
+            self.nucleus,
+            self.protein,
+            SegmentationConfig(min_nucleus_area=30, protein_channel=0),
+        )
         self.assertEqual(len(result["nuclei"]), 2)
         self.assertGreater(result["nuclei"][0]["protein_mean"], 1000)
         self.assertEqual(result["nuclei"][0]["state"], "active")
@@ -33,12 +37,26 @@ class ProcessingTests(unittest.TestCase):
 
     def test_grayscale_channel_validation(self) -> None:
         with self.assertRaises(ValueError):
-            process_arrays(self.nucleus, self.protein, SegmentationConfig(protein_channel=1))
+            process_arrays(
+                self.nucleus, self.protein, SegmentationConfig(protein_channel=1)
+            )
 
     def test_aggregate_reports_mean_and_standard_deviation(self) -> None:
         nuclei = [
-            {"state": "active", "area_px": 10, "protein_mean": 10.0, "protein_mean_background_corrected": 8.0, "nucleus_mean": 20.0},
-            {"state": "active", "area_px": 12, "protein_mean": 14.0, "protein_mean_background_corrected": 12.0, "nucleus_mean": 24.0},
+            {
+                "state": "active",
+                "area_px": 10,
+                "protein_mean": 10.0,
+                "protein_mean_background_corrected": 8.0,
+                "nucleus_mean": 20.0,
+            },
+            {
+                "state": "active",
+                "area_px": 12,
+                "protein_mean": 14.0,
+                "protein_mean_background_corrected": 12.0,
+                "nucleus_mean": 24.0,
+            },
         ]
         aggregate = aggregate_metrics(nuclei)
         self.assertEqual(aggregate["mean_protein"], 12.0)

@@ -50,23 +50,58 @@ class SQLiteRepository:
             with connection:
                 yield connection
 
-    def save_session(self, session_id: str, job_id: str, revision: int, status: str, config: dict[str, Any], metadata: dict[str, Any], now: str) -> None:
+    def save_session(
+        self,
+        session_id: str,
+        job_id: str,
+        revision: int,
+        status: str,
+        config: dict[str, Any],
+        metadata: dict[str, Any],
+        now: str,
+    ) -> None:
         with self.lock, self._transaction() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (session_id, job_id, revision, status, json.dumps(config, ensure_ascii=False), json.dumps(metadata, ensure_ascii=False), now, now),
+                (
+                    session_id,
+                    job_id,
+                    revision,
+                    status,
+                    json.dumps(config, ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                    now,
+                    now,
+                ),
             )
 
-    def update_session(self, session_id: str, revision: int, status: str, config: dict[str, Any], metadata: dict[str, Any], now: str) -> None:
+    def update_session(
+        self,
+        session_id: str,
+        revision: int,
+        status: str,
+        config: dict[str, Any],
+        metadata: dict[str, Any],
+        now: str,
+    ) -> None:
         with self.lock, self._transaction() as connection:
             connection.execute(
                 "UPDATE sessions SET revision=?, status=?, config_json=?, metadata_json=?, updated_at=? WHERE id=?",
-                (revision, status, json.dumps(config, ensure_ascii=False), json.dumps(metadata, ensure_ascii=False), now, session_id),
+                (
+                    revision,
+                    status,
+                    json.dumps(config, ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                    now,
+                    session_id,
+                ),
             )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self.lock, self._transaction() as connection:
-            row = connection.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE id=?", (session_id,)
+            ).fetchone()
         if row is None:
             return None
         result = dict(row)
@@ -74,14 +109,32 @@ class SQLiteRepository:
         result["metadata"] = json.loads(result.pop("metadata_json"))
         return result
 
-    def append_history(self, session_id: str, revision: int, operation: str, payload: dict[str, Any], now: str) -> None:
+    def append_history(
+        self,
+        session_id: str,
+        revision: int,
+        operation: str,
+        payload: dict[str, Any],
+        now: str,
+    ) -> None:
         with self.lock, self._transaction() as connection:
             connection.execute(
                 "INSERT INTO edit_history(session_id, revision, operation, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, revision, operation, json.dumps(payload, ensure_ascii=False), now),
+                (
+                    session_id,
+                    revision,
+                    operation,
+                    json.dumps(payload, ensure_ascii=False),
+                    now,
+                ),
             )
 
     def history(self, session_id: str) -> list[dict[str, Any]]:
         with self.lock, self._transaction() as connection:
-            rows = connection.execute("SELECT revision, operation, payload_json, created_at FROM edit_history WHERE session_id=? ORDER BY id", (session_id,)).fetchall()
-        return [{**dict(row), "payload": json.loads(row["payload_json"])} for row in rows]
+            rows = connection.execute(
+                "SELECT revision, operation, payload_json, created_at FROM edit_history WHERE session_id=? ORDER BY id",
+                (session_id,),
+            ).fetchall()
+        return [
+            {**dict(row), "payload": json.loads(row["payload_json"])} for row in rows
+        ]

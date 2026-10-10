@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import argparse
@@ -12,7 +11,6 @@ from typing import Iterable
 
 import cv2
 import numpy as np
-
 
 LOGGER = logging.getLogger("pipeline_melhorado")
 CHANNEL_SUFFIX = re.compile(r"(?:_z0)?_ch(?P<channel>00|02)\.tif$", re.IGNORECASE)
@@ -89,7 +87,9 @@ def _odd(value: int) -> int:
     return value
 
 
-def segment_nuclei(signal: np.ndarray, config: PipelineConfig) -> tuple[np.ndarray, np.ndarray, float]:
+def segment_nuclei(
+    signal: np.ndarray, config: PipelineConfig
+) -> tuple[np.ndarray, np.ndarray, float]:
 
     image = np.clip(signal, 0, 255).astype(np.uint8)
     blurred = cv2.GaussianBlur(
@@ -170,9 +170,7 @@ def measure_sample(
         )
 
     labels, mask, threshold = segment_nuclei(nucleus_signal, config)
-    background_mask = _background_reference_mask(
-        labels, config.background_border_width
-    )
+    background_mask = _background_reference_mask(labels, config.background_border_width)
     background_values = protein_signal[background_mask]
     background_mean = float(background_values.mean())
     rows: list[dict] = []
@@ -238,9 +236,7 @@ def measure_sample(
             cv2.NORM_MINMAX,
         )
         overlay = cv2.cvtColor(normalized, cv2.COLOR_GRAY2BGR)
-        contours, _ = cv2.findContours(
-            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(overlay, contours, -1, (0, 255, 0), 1)
         if not cv2.imwrite(str(overlay_dir / f"{safe_name}.png"), overlay):
             raise IOError(f"Falha ao gravar overlay de {pair.key}")
@@ -268,7 +264,11 @@ def run_pipeline(
             "sample_key": pair.key,
             "nucleus_file": pair.nucleus_path.name if pair.nucleus_path else "",
             "protein_file": pair.protein_path.name if pair.protein_path else "",
-            "status": "paired" if pair.nucleus_path and pair.protein_path else "incomplete_pair",
+            "status": (
+                "paired"
+                if pair.nucleus_path and pair.protein_path
+                else "incomplete_pair"
+            ),
         }
         for pair in pairs
     ]
@@ -322,8 +322,12 @@ def run_pipeline(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--nuclei-dir", type=Path, default=Path("data/raw/imagens_nucleos"))
-    parser.add_argument("--protein-dir", type=Path, default=Path("data/raw/imagens_proteinas"))
+    parser.add_argument(
+        "--nuclei-dir", type=Path, default=Path("data/raw/imagens_nucleos")
+    )
+    parser.add_argument(
+        "--protein-dir", type=Path, default=Path("data/raw/imagens_proteinas")
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     parser.add_argument("--min-nucleus-area", type=int, default=100)
     parser.add_argument("--background-border-width", type=int, default=20)
@@ -338,7 +342,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format="%(levelname)s: %(message)s",
+    )
     config = PipelineConfig(
         min_nucleus_area=args.min_nucleus_area,
         background_border_width=args.background_border_width,

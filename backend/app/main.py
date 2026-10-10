@@ -10,10 +10,19 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
-from .models.schemas import EditRequest, ReprocessRequest, RevisionRequest, SegmentationConfig
+from .models.schemas import (
+    EditRequest,
+    ReprocessRequest,
+    RevisionRequest,
+    SegmentationConfig,
+)
 from .repositories.sqlite import SQLiteRepository
-from .services.session_manager import RevisionConflict, SessionManager, job_payload, model_dump
-
+from .services.session_manager import (
+    RevisionConflict,
+    SessionManager,
+    job_payload,
+    model_dump,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.environ.get("NUCLEI_DATA_DIR", str(PROJECT_ROOT / ".nuclei_data")))
@@ -61,16 +70,29 @@ def health() -> dict[str, str]:
 
 @app.post("/api/sessions", status_code=status.HTTP_202_ACCEPTED)
 async def create_session(
-    nucleus_file: Annotated[UploadFile, File(description="Imagem ou canal dos núcleos")],
-    protein_file: Annotated[UploadFile | None, File(description="Imagem/canal da proteína; omita para usar outro canal do mesmo arquivo")]=None,
+    nucleus_file: Annotated[
+        UploadFile, File(description="Imagem ou canal dos núcleos")
+    ],
+    protein_file: Annotated[
+        UploadFile | None,
+        File(
+            description="Imagem/canal da proteína; omita para usar outro canal do mesmo arquivo"
+        ),
+    ] = None,
     config_json: Annotated[str, Form()] = "{}",
 ):
     try:
         config = SegmentationConfig(**json.loads(config_json))
         nucleus_data = await nucleus_file.read()
-        protein_data = await protein_file.read() if protein_file is not None else nucleus_data
+        protein_data = (
+            await protein_file.read() if protein_file is not None else nucleus_data
+        )
         source_name = nucleus_file.filename or "nuclei.tif"
-        protein_name = protein_file.filename if protein_file is not None else f"{Path(source_name).stem}_multichannel{Path(source_name).suffix}"
+        protein_name = (
+            protein_file.filename
+            if protein_file is not None
+            else f"{Path(source_name).stem}_multichannel{Path(source_name).suffix}"
+        )
         state = manager.create_session(
             nucleus_data,
             nucleus_file.filename or "nuclei.tif",
@@ -85,8 +107,12 @@ async def create_session(
 
 @app.post("/api/batches", status_code=status.HTTP_202_ACCEPTED)
 async def create_batch(
-    nucleus_files: Annotated[list[UploadFile], File(description="Arquivos da pasta de núcleos")],
-    protein_files: Annotated[list[UploadFile], File(description="Arquivos da pasta de proteínas")],
+    nucleus_files: Annotated[
+        list[UploadFile], File(description="Arquivos da pasta de núcleos")
+    ],
+    protein_files: Annotated[
+        list[UploadFile], File(description="Arquivos da pasta de proteínas")
+    ],
     config_json: Annotated[str, Form()] = "{}",
 ):
     try:
@@ -110,7 +136,9 @@ def get_batch(batch_id: str):
 @app.get("/api/batches/{batch_id}/standard-deviation.png")
 def get_batch_standard_deviation_histogram(batch_id: str):
     try:
-        return Response(manager.batch_standard_deviation_histogram(batch_id), media_type="image/png")
+        return Response(
+            manager.batch_standard_deviation_histogram(batch_id), media_type="image/png"
+        )
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Lote não encontrado") from error
 
@@ -131,7 +159,9 @@ def export_batch_csv(batch_id: str):
         return Response(
             manager.export_batch_csv(batch_id),
             media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="batch-{batch_id}.csv"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="batch-{batch_id}.csv"'
+            },
         )
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Lote não encontrado") from error
@@ -207,7 +237,11 @@ def apply_edit(session_id: str, request: EditRequest):
     except RevisionConflict as error:
         raise HTTPException(
             status_code=409,
-            detail={"message": str(error), "current_revision": error.current_revision, "result": error.result},
+            detail={
+                "message": str(error),
+                "current_revision": error.current_revision,
+                "result": error.result,
+            },
         ) from error
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -224,7 +258,11 @@ def reprocess(session_id: str, request: ReprocessRequest):
     except RevisionConflict as error:
         raise HTTPException(
             status_code=409,
-            detail={"message": str(error), "current_revision": error.current_revision, "result": error.result},
+            detail={
+                "message": str(error),
+                "current_revision": error.current_revision,
+                "result": error.result,
+            },
         ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -238,7 +276,11 @@ def undo(session_id: str, request: RevisionRequest):
     except RevisionConflict as error:
         raise HTTPException(
             status_code=409,
-            detail={"message": str(error), "current_revision": error.current_revision, "result": error.result},
+            detail={
+                "message": str(error),
+                "current_revision": error.current_revision,
+                "result": error.result,
+            },
         ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -252,7 +294,11 @@ def redo(session_id: str, request: RevisionRequest):
     except RevisionConflict as error:
         raise HTTPException(
             status_code=409,
-            detail={"message": str(error), "current_revision": error.current_revision, "result": error.result},
+            detail={
+                "message": str(error),
+                "current_revision": error.current_revision,
+                "result": error.result,
+            },
         ) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -264,7 +310,9 @@ def export_csv(session_id: str):
     return Response(
         manager.export_csv(session_id),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="nuclei-{session_id}.csv"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="nuclei-{session_id}.csv"'
+        },
     )
 
 
@@ -274,7 +322,9 @@ def export_json(session_id: str):
     return Response(
         manager.export_json(session_id),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="nuclei-{session_id}.json"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="nuclei-{session_id}.json"'
+        },
     )
 
 
@@ -285,7 +335,9 @@ def protein_histogram(session_id: str):
         return Response(
             manager.protein_mean_histogram(session_id),
             media_type="image/png",
-            headers={"Content-Disposition": f'inline; filename="protein-histogram-{session_id}.png"'},
+            headers={
+                "Content-Disposition": f'inline; filename="protein-histogram-{session_id}.png"'
+            },
         )
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

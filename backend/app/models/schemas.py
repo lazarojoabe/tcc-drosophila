@@ -42,8 +42,12 @@ class EditRequest(BaseModel):
 
     @field_validator("polygon")
     @classmethod
-    def polygon_points(cls, value: list[list[float]] | None) -> list[list[float]] | None:
-        if value is not None and (len(value) < 3 or any(len(point) != 2 for point in value)):
+    def polygon_points(
+        cls, value: list[list[float]] | None
+    ) -> list[list[float]] | None:
+        if value is not None and (
+            len(value) < 3 or any(len(point) != 2 for point in value)
+        ):
             raise ValueError("O contorno deve ter pelo menos três pontos [x, y]")
         return value
 

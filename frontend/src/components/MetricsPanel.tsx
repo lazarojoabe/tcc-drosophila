@@ -1,4 +1,144 @@
 import type { AggregateMetrics, Nucleus } from "../types";
-interface Props { nucleus?: Nucleus; aggregate?: AggregateMetrics; revision: number; onAction: (operation: "hide" | "exclude" | "restore") => void; editing: boolean; onEdit: () => void; onSave: () => void; onCancel: () => void; }
-function Value({ label, value }: { label: string; value: unknown }) { const rendered = value === null || value === undefined ? "—" : typeof value === "number" ? value.toFixed(3) : String(value); return <div className="metric"><span>{label}</span><strong>{rendered}</strong></div>; }
-export function MetricsPanel({ nucleus, aggregate, onAction, editing, onEdit, onSave, onCancel }: Props) { return <aside className="panel right"><div className="panel-title"><span>Resumo da amostra</span><span className="sample-count">{aggregate ? `${aggregate.nucleus_count} ativos` : "—"}</span></div>{aggregate ? <><h4>Proteína entre núcleos</h4><div className="metrics-grid"><Value label="Média" value={aggregate.mean_protein} /><Value label="Desvio padrão" value={aggregate.std_protein} /><Value label="Média corrigida" value={aggregate.mean_protein_background_corrected} /><Value label="DP corrigido" value={aggregate.std_protein_background_corrected} /></div></> : null}{!nucleus ? <div className="empty-panel">Selecione um núcleo para consultar as métricas individuais.</div> : <><div className="panel-title nucleus-title"><span>Núcleo #{nucleus.nucleus_id}</span><span className={`state state-${nucleus.state}`}>{nucleus.state}</span></div><div className="action-row">{editing ? <><button className="primary" onClick={onSave}>Confirmar</button><button onClick={onCancel}>Cancelar</button></> : <><button onClick={onEdit}>Editar contorno</button><button onClick={() => onAction(nucleus.state === "hidden" ? "restore" : "hide")}>{nucleus.state === "hidden" ? "Mostrar" : "Ocultar"}</button><button className="danger" onClick={() => onAction(nucleus.state === "excluded" ? "restore" : "exclude")}>{nucleus.state === "excluded" ? "Restaurar" : "Excluir"}</button></>}</div><h4>Geometria</h4><div className="metrics-grid"><Value label="Área" value={`${nucleus.area_px} px²`} /><Value label="Área espacial" value={nucleus.area_um2 ? `${nucleus.area_um2.toFixed(2)} µm²` : null} /><Value label="Centroide" value={`${nucleus.centroid_x.toFixed(1)}, ${nucleus.centroid_y.toFixed(1)}`} /><Value label="Perímetro" value={nucleus.perimeter_px} /><Value label="Raio eq." value={nucleus.equivalent_radius_px} /><Value label="Eixo maior" value={nucleus.major_axis_px} /><Value label="Eixo menor" value={nucleus.minor_axis_px} /><Value label="Excentricidade" value={nucleus.eccentricity} /></div><h4>Intensidade individual</h4><div className="metrics-grid"><Value label="Núcleo média" value={nucleus.nucleus_mean} /><Value label="Núcleo mediana" value={nucleus.nucleus_median} /><Value label="Núcleo σ" value={nucleus.nucleus_std} /><Value label="Proteína média" value={nucleus.protein_mean} /><Value label="Proteína mediana" value={nucleus.protein_median} /><Value label="Proteína σ" value={nucleus.protein_std} /><Value label="Proteína integrada" value={nucleus.protein_integrated} /><Value label="Fundo" value={nucleus.background_mean} /><Value label="Prot. corrigida" value={nucleus.protein_mean_background_corrected} /></div></>}</aside>; }
+interface Props {
+  nucleus?: Nucleus;
+  aggregate?: AggregateMetrics;
+  revision: number;
+  onAction: (operation: "hide" | "exclude" | "restore") => void;
+  editing: boolean;
+  onEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}
+function Value({ label, value }: { label: string; value: unknown }) {
+  const rendered =
+    value === null || value === undefined
+      ? "—"
+      : typeof value === "number"
+        ? value.toFixed(3)
+        : String(value);
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{rendered}</strong>
+    </div>
+  );
+}
+export function MetricsPanel({
+  nucleus,
+  aggregate,
+  onAction,
+  editing,
+  onEdit,
+  onSave,
+  onCancel,
+}: Props) {
+  return (
+    <aside className="panel right">
+      <div className="panel-title">
+        <span>Resumo da amostra</span>
+        <span className="sample-count">
+          {aggregate ? `${aggregate.nucleus_count} ativos` : "—"}
+        </span>
+      </div>
+      {aggregate ? (
+        <>
+          <h4>Proteína entre núcleos</h4>
+          <div className="metrics-grid">
+            <Value label="Média" value={aggregate.mean_protein} />
+            <Value label="Desvio padrão" value={aggregate.std_protein} />
+            <Value
+              label="Média corrigida"
+              value={aggregate.mean_protein_background_corrected}
+            />
+            <Value
+              label="DP corrigido"
+              value={aggregate.std_protein_background_corrected}
+            />
+          </div>
+        </>
+      ) : null}
+      {!nucleus ? (
+        <div className="empty-panel">
+          Selecione um núcleo para consultar as métricas individuais.
+        </div>
+      ) : (
+        <>
+          <div className="panel-title nucleus-title">
+            <span>Núcleo #{nucleus.nucleus_id}</span>
+            <span className={`state state-${nucleus.state}`}>
+              {nucleus.state}
+            </span>
+          </div>
+          <div className="action-row">
+            {editing ? (
+              <>
+                <button className="primary" onClick={onSave}>
+                  Confirmar
+                </button>
+                <button onClick={onCancel}>Cancelar</button>
+              </>
+            ) : (
+              <>
+                <button onClick={onEdit}>Editar contorno</button>
+                <button
+                  onClick={() =>
+                    onAction(nucleus.state === "hidden" ? "restore" : "hide")
+                  }
+                >
+                  {nucleus.state === "hidden" ? "Mostrar" : "Ocultar"}
+                </button>
+                <button
+                  className="danger"
+                  onClick={() =>
+                    onAction(
+                      nucleus.state === "excluded" ? "restore" : "exclude",
+                    )
+                  }
+                >
+                  {nucleus.state === "excluded" ? "Restaurar" : "Excluir"}
+                </button>
+              </>
+            )}
+          </div>
+          <h4>Geometria</h4>
+          <div className="metrics-grid">
+            <Value label="Área" value={`${nucleus.area_px} px²`} />
+            <Value
+              label="Área espacial"
+              value={
+                nucleus.area_um2 ? `${nucleus.area_um2.toFixed(2)} µm²` : null
+              }
+            />
+            <Value
+              label="Centroide"
+              value={`${nucleus.centroid_x.toFixed(1)}, ${nucleus.centroid_y.toFixed(1)}`}
+            />
+            <Value label="Perímetro" value={nucleus.perimeter_px} />
+            <Value label="Raio eq." value={nucleus.equivalent_radius_px} />
+            <Value label="Eixo maior" value={nucleus.major_axis_px} />
+            <Value label="Eixo menor" value={nucleus.minor_axis_px} />
+            <Value label="Excentricidade" value={nucleus.eccentricity} />
+          </div>
+          <h4>Intensidade individual</h4>
+          <div className="metrics-grid">
+            <Value label="Núcleo média" value={nucleus.nucleus_mean} />
+            <Value label="Núcleo mediana" value={nucleus.nucleus_median} />
+            <Value label="Núcleo σ" value={nucleus.nucleus_std} />
+            <Value label="Proteína média" value={nucleus.protein_mean} />
+            <Value label="Proteína mediana" value={nucleus.protein_median} />
+            <Value label="Proteína σ" value={nucleus.protein_std} />
+            <Value
+              label="Proteína integrada"
+              value={nucleus.protein_integrated}
+            />
+            <Value label="Fundo" value={nucleus.background_mean} />
+            <Value
+              label="Prot. corrigida"
+              value={nucleus.protein_mean_background_corrected}
+            />
+          </div>
+        </>
+      )}
+    </aside>
+  );
+}

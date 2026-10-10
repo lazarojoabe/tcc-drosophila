@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import csv
@@ -26,9 +25,7 @@ def legacy_measurement(filled_path: Path, protein_path: Path) -> dict:
     protein_raw = read_channel(protein_path, 2)
     if nuclei is None or protein_gray is None:
         raise IOError(f"Falha de leitura no baseline: {filled_path.name}")
-    contours, _ = cv2.findContours(
-        nuclei, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
+    contours, _ = cv2.findContours(nuclei, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     coordinates = [tuple(point[0]) for contour in contours for point in contour]
     if not coordinates:
         return {
@@ -65,9 +62,14 @@ def main() -> None:
     output_dir = root / "results"
     improved_summary = load_rows(output_dir / "resumo_por_amostra.csv")
     improved_nuclei = load_rows(output_dir / "resultados_por_nucleo.csv")
-    pairs = build_manifest(root / "data/raw/imagens_nucleos", root / "data/raw/imagens_proteinas")
+    pairs = build_manifest(
+        root / "data/raw/imagens_nucleos", root / "data/raw/imagens_proteinas"
+    )
 
-    filled = {pairing_key(path): path for path in (root / "data/baseline/nucleos_preenchidos").glob("*.tif")}
+    filled = {
+        pairing_key(path): path
+        for path in (root / "data/baseline/nucleos_preenchidos").glob("*.tif")
+    }
     protein_by_name = {
         path.name: path for path in (root / "data/raw/imagens_proteinas").glob("*.tif")
     }
@@ -95,18 +97,45 @@ def main() -> None:
                 "improved_status": summary.get("status", "missing"),
                 "legacy_contours": baseline.get("legacy_contours", ""),
                 "legacy_boundary_points": baseline.get("legacy_boundary_points", ""),
-                "legacy_mean_gray_boundary": baseline.get("legacy_mean_gray_boundary", ""),
-                "legacy_mean_red_boundary": baseline.get("legacy_mean_red_boundary", ""),
-                "legacy_std_gray_boundary": baseline.get("legacy_std_gray_boundary", ""),
+                "legacy_mean_gray_boundary": baseline.get(
+                    "legacy_mean_gray_boundary", ""
+                ),
+                "legacy_mean_red_boundary": baseline.get(
+                    "legacy_mean_red_boundary", ""
+                ),
+                "legacy_std_gray_boundary": baseline.get(
+                    "legacy_std_gray_boundary", ""
+                ),
                 "legacy_std_red_boundary": baseline.get("legacy_std_red_boundary", ""),
                 "improved_nucleus_count": summary.get("nucleus_count", ""),
                 "improved_area_total_px": summary.get("area_total_px", ""),
-                "improved_mean_raw_red_per_nucleus": summary.get("mean_raw_red_per_nucleus", ""),
+                "improved_mean_raw_red_per_nucleus": summary.get(
+                    "mean_raw_red_per_nucleus", ""
+                ),
                 "improved_mean_background_corrected_red_per_nucleus": summary.get(
                     "mean_background_corrected_red_per_nucleus", ""
                 ),
-                "improved_std_raw_red_per_nucleus": float(np.std([float(item["signal_mean_raw"]) for item in nucleus_rows])) if nucleus_rows else "",
-                "improved_std_background_corrected_red_per_nucleus": float(np.std([float(item["signal_mean_background_corrected"]) for item in nucleus_rows])) if nucleus_rows else "",
+                "improved_std_raw_red_per_nucleus": (
+                    float(
+                        np.std(
+                            [float(item["signal_mean_raw"]) for item in nucleus_rows]
+                        )
+                    )
+                    if nucleus_rows
+                    else ""
+                ),
+                "improved_std_background_corrected_red_per_nucleus": (
+                    float(
+                        np.std(
+                            [
+                                float(item["signal_mean_background_corrected"])
+                                for item in nucleus_rows
+                            ]
+                        )
+                    )
+                    if nucleus_rows
+                    else ""
+                ),
             }
         )
 
@@ -115,28 +144,54 @@ def main() -> None:
     common = [
         row
         for row in comparison_rows
-        if row["legacy_status"] == "measured"
-        and row["improved_status"] == "ok"
+        if row["legacy_status"] == "measured" and row["improved_status"] == "ok"
     ]
     legacy = np.array([float(row["legacy_mean_gray_boundary"]) for row in common])
     raw = np.array([float(row["improved_mean_raw_red_per_nucleus"]) for row in common])
     corrected = np.array(
-        [float(row["improved_mean_background_corrected_red_per_nucleus"]) for row in common]
+        [
+            float(row["improved_mean_background_corrected_red_per_nucleus"])
+            for row in common
+        ]
     )
     deltas = corrected - legacy
     summary = {
-        "legacy_total_input_nuclei": len(list((root / "data/raw/imagens_nucleos").glob("*.tif"))),
+        "legacy_total_input_nuclei": len(
+            list((root / "data/raw/imagens_nucleos").glob("*.tif"))
+        ),
         "legacy_measured_pairs": len(common),
         "improved_pairs": sum(row["has_pair"] for row in comparison_rows),
-        "unmatched_legacy_or_missing": sum(row["legacy_status"] != "measured" for row in comparison_rows),
-        "legacy_mean_gray_boundary_common": float(legacy.mean()) if legacy.size else None,
-        "improved_mean_raw_red_per_nucleus_common": float(raw.mean()) if raw.size else None,
-        "improved_mean_background_corrected_red_per_nucleus_common": float(corrected.mean()) if corrected.size else None,
-        "mean_absolute_change_corrected_minus_legacy": float(np.abs(deltas).mean()) if deltas.size else None,
-        "median_absolute_change_corrected_minus_legacy": float(np.median(np.abs(deltas))) if deltas.size else None,
-        "mean_relative_change_corrected_vs_legacy_percent": float(np.mean(deltas / legacy) * 100) if np.all(legacy != 0) else None,
-        "legacy_contours_mean_common": float(np.mean([float(row["legacy_contours"]) for row in common])) if common else None,
-        "improved_nuclei_mean_common": float(np.mean([float(row["improved_nucleus_count"]) for row in common])) if common else None,
+        "unmatched_legacy_or_missing": sum(
+            row["legacy_status"] != "measured" for row in comparison_rows
+        ),
+        "legacy_mean_gray_boundary_common": (
+            float(legacy.mean()) if legacy.size else None
+        ),
+        "improved_mean_raw_red_per_nucleus_common": (
+            float(raw.mean()) if raw.size else None
+        ),
+        "improved_mean_background_corrected_red_per_nucleus_common": (
+            float(corrected.mean()) if corrected.size else None
+        ),
+        "mean_absolute_change_corrected_minus_legacy": (
+            float(np.abs(deltas).mean()) if deltas.size else None
+        ),
+        "median_absolute_change_corrected_minus_legacy": (
+            float(np.median(np.abs(deltas))) if deltas.size else None
+        ),
+        "mean_relative_change_corrected_vs_legacy_percent": (
+            float(np.mean(deltas / legacy) * 100) if np.all(legacy != 0) else None
+        ),
+        "legacy_contours_mean_common": (
+            float(np.mean([float(row["legacy_contours"]) for row in common]))
+            if common
+            else None
+        ),
+        "improved_nuclei_mean_common": (
+            float(np.mean([float(row["improved_nucleus_count"]) for row in common]))
+            if common
+            else None
+        ),
     }
     (output_dir / "comparativo_resumo.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -158,7 +213,9 @@ def main() -> None:
         "",
         "A diferença inclui quatro mudanças deliberadas: canal vermelho bruto, pixels do interior, identificação individual dos núcleos e correção global do fundo. Portanto, ela não deve ser interpretada como simples ganho/perda de desempenho numérico; trata-se de uma mudança na definição da medida.",
     ]
-    (output_dir / "comparativo_resultados.md").write_text("\n".join(markdown) + "\n", encoding="utf-8")
+    (output_dir / "comparativo_resultados.md").write_text(
+        "\n".join(markdown) + "\n", encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

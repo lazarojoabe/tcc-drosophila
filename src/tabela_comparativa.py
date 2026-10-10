@@ -7,7 +7,6 @@ import csv
 import math
 from pathlib import Path
 
-
 INPUT_NAME = "comparativo_amostras.csv"
 
 
@@ -35,7 +34,9 @@ def build_rows(source_rows: list[dict[str, str]]) -> list[dict[str, str]]:
         tcc_corrected = number(
             source["improved_mean_background_corrected_red_per_nucleus"]
         )
-        delta = tcc_corrected - ic if ic is not None and tcc_corrected is not None else None
+        delta = (
+            tcc_corrected - ic if ic is not None and tcc_corrected is not None else None
+        )
         percent = 100 * delta / ic if delta is not None and ic != 0 else None
         rows.append(
             {

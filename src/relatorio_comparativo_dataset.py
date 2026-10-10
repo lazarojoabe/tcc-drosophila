@@ -38,7 +38,11 @@ def main() -> None:
     input_path = root / "results" / "comparativo_amostras.csv"
     output_path = root / "results" / "comparacao_completa_dataset.md"
     rows = read_rows(input_path)
-    common = [row for row in rows if row.get("legacy_status") == "measured" and row.get("improved_status") == "ok"]
+    common = [
+        row
+        for row in rows
+        if row.get("legacy_status") == "measured" and row.get("improved_status") == "ok"
+    ]
     old_measured = sum(row.get("legacy_status") == "measured" for row in rows)
     new_measured = sum(row.get("improved_status") == "ok" for row in rows)
     lines = [
@@ -60,9 +64,17 @@ def main() -> None:
     ]
     for row in rows:
         old_mean = number(row.get("legacy_mean_gray_boundary"))
-        corrected = number(row.get("improved_mean_background_corrected_red_per_nucleus"))
-        difference = corrected - old_mean if old_mean is not None and corrected is not None else None
-        variation = 100 * difference / old_mean if difference is not None and old_mean else None
+        corrected = number(
+            row.get("improved_mean_background_corrected_red_per_nucleus")
+        )
+        difference = (
+            corrected - old_mean
+            if old_mean is not None and corrected is not None
+            else None
+        )
+        variation = (
+            100 * difference / old_mean if difference is not None and old_mean else None
+        )
         lines.append(
             "| {sample} | {old_status} | {new_status} | {old_count} | {new_count} | {old_mean} | {old_std} | {new_mean} | {new_std} | {corrected_mean} | {corrected_std} | {difference} | {variation}% |".format(
                 sample=row.get("sample_key", ""),
@@ -74,20 +86,26 @@ def main() -> None:
                 old_std=fmt(row.get("legacy_std_gray_boundary")),
                 new_mean=fmt(row.get("improved_mean_raw_red_per_nucleus")),
                 new_std=fmt(row.get("improved_std_raw_red_per_nucleus")),
-                corrected_mean=fmt(row.get("improved_mean_background_corrected_red_per_nucleus")),
-                corrected_std=fmt(row.get("improved_std_background_corrected_red_per_nucleus")),
+                corrected_mean=fmt(
+                    row.get("improved_mean_background_corrected_red_per_nucleus")
+                ),
+                corrected_std=fmt(
+                    row.get("improved_std_background_corrected_red_per_nucleus")
+                ),
                 difference="—" if difference is None else f"{difference:.2f}",
                 variation="—" if variation is None else f"{variation:.2f}",
             )
         )
-    lines.extend([
-        "",
-        "## Interpretação",
-        "",
-        "A diferença numérica não deve ser interpretada como ganho biológico direto, porque os métodos não calculam exatamente a mesma grandeza. O baseline usa pontos do contorno e tons de cinza; o algoritmo do TCC usa pixels internos, identifica núcleos individualmente, preserva o canal proteico e calcula o fundo. Portanto, esta tabela documenta a mudança de medida e a cobertura do dataset; a validação de acurácia exige anotações manuais e controles experimentais.",
-        "",
-        "Os desvios padrão do TCC nesta tabela representam a dispersão das intensidades médias entre os núcleos da respectiva amostra. Os desvios padrão do baseline representam a dispersão dos valores nos pontos de contorno.",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Interpretação",
+            "",
+            "A diferença numérica não deve ser interpretada como ganho biológico direto, porque os métodos não calculam exatamente a mesma grandeza. O baseline usa pontos do contorno e tons de cinza; o algoritmo do TCC usa pixels internos, identifica núcleos individualmente, preserva o canal proteico e calcula o fundo. Portanto, esta tabela documenta a mudança de medida e a cobertura do dataset; a validação de acurácia exige anotações manuais e controles experimentais.",
+            "",
+            "Os desvios padrão do TCC nesta tabela representam a dispersão das intensidades médias entre os núcleos da respectiva amostra. Os desvios padrão do baseline representam a dispersão dos valores nos pontos de contorno.",
+        ]
+    )
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Relatório Markdown: {output_path}")
     print(f"Amostras: {len(rows)} | comuns: {len(common)}")

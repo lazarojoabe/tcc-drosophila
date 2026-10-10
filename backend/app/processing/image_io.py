@@ -8,11 +8,18 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-
 SUPPORTED_EXTENSIONS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.()\-+ ]+")
-_DERIVED_MARKERS = ("_border", "_mask", "_overlay", "_draw", "binariz", "gaussian", "filled")
+_DERIVED_MARKERS = (
+    "_border",
+    "_mask",
+    "_overlay",
+    "_draw",
+    "binariz",
+    "gaussian",
+    "filled",
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +40,9 @@ def safe_filename(name: str, fallback: str = "image.tif") -> str:
     if not cleaned:
         cleaned = fallback
     if Path(cleaned).suffix.lower() not in SUPPORTED_EXTENSIONS:
-        raise ValueError(f"Formato não suportado: {Path(cleaned).suffix or '(sem extensão)'}")
+        raise ValueError(
+            f"Formato não suportado: {Path(cleaned).suffix or '(sem extensão)'}"
+        )
     return cleaned[:180]
 
 
@@ -46,7 +55,9 @@ def decode_image(data: bytes, name: str) -> tuple[np.ndarray, ImageInfo]:
     if not data:
         raise ValueError(f"Arquivo vazio: {name}")
     if len(data) > MAX_UPLOAD_BYTES:
-        raise ValueError(f"Arquivo excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+        raise ValueError(
+            f"Arquivo excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB"
+        )
     array = np.frombuffer(data, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_UNCHANGED)
     if image is None or image.size == 0:

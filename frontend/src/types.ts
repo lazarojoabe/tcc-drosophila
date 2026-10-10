@@ -29,16 +29,102 @@ export interface Nucleus {
 }
 
 export interface Config {
-  nucleus_channel: number; protein_channel: number; gaussian_kernel: number; gaussian_sigma: number;
-  opening_kernel: number; closing_kernel: number; min_nucleus_area: number; background_border_width: number;
-  pixel_size: number | null; pixel_unit: string; input_mode: "auto" | "raw" | "derived";
+  nucleus_channel: number;
+  protein_channel: number;
+  gaussian_kernel: number;
+  gaussian_sigma: number;
+  opening_kernel: number;
+  closing_kernel: number;
+  min_nucleus_area: number;
+  background_border_width: number;
+  pixel_size: number | null;
+  pixel_unit: string;
+  input_mode: "auto" | "raw" | "derived";
 }
-export interface ImageDescriptor { name: string; role: "nucleus" | "protein"; width: number; height: number; channels: number; dtype: string; derived: boolean; }
-export interface Session { session_id: string; job_id: string; status: string; revision: number; config: Config; warnings: string[]; images: ImageDescriptor[]; }
-export interface AggregateMetrics { nucleus_count: number; visible_count: number; excluded_count: number; hidden_count: number; total_area_px: number; mean_protein: number | null; std_protein: number | null; mean_protein_background_corrected: number | null; std_protein_background_corrected: number | null; mean_nucleus_intensity: number | null; std_nucleus_intensity: number | null; }
-export interface Result { session_id: string; revision: number; status: string; config: Config; warnings: string[]; shape: { width: number; height: number } | null; nuclei: Nucleus[]; aggregate: AggregateMetrics; job_id: string; }
-export interface Job { job_id: string; session_id: string; status: string; progress: number; message: string; error: string | null; }
-export interface BatchPairMetrics { nucleus_count: number | null; mean_protein: number | null; std_protein: number | null; mean_protein_background_corrected: number | null; std_protein_background_corrected: number | null; }
-export interface BatchPair { key: string; nucleus_file: string | null; protein_file: string | null; session_id: string | null; job_id: string | null; status: "paired" | "incomplete" | "error" | "ready"; metrics?: BatchPairMetrics; error: string | null; }
-export interface BatchSummary { images_processed: number; mean_protein_std: number | null; std_protein_std: number | null; protein_std_values: { key: string; value: number }[]; nucleus_count_values: { key: string; value: number }[]; protein_mean_values_count: number; }
-export interface Batch { batch_id: string; job_id: string; status: "queued" | "running" | "completed" | "error"; progress: number; total: number; completed: number; failed: number; pairs: BatchPair[]; summary?: BatchSummary; error: string | null; }
+export interface ImageDescriptor {
+  name: string;
+  role: "nucleus" | "protein";
+  width: number;
+  height: number;
+  channels: number;
+  dtype: string;
+  derived: boolean;
+}
+export interface Session {
+  session_id: string;
+  job_id: string;
+  status: string;
+  revision: number;
+  config: Config;
+  warnings: string[];
+  images: ImageDescriptor[];
+}
+export interface AggregateMetrics {
+  nucleus_count: number;
+  visible_count: number;
+  excluded_count: number;
+  hidden_count: number;
+  total_area_px: number;
+  mean_protein: number | null;
+  std_protein: number | null;
+  mean_protein_background_corrected: number | null;
+  std_protein_background_corrected: number | null;
+  mean_nucleus_intensity: number | null;
+  std_nucleus_intensity: number | null;
+}
+export interface Result {
+  session_id: string;
+  revision: number;
+  status: string;
+  config: Config;
+  warnings: string[];
+  shape: { width: number; height: number } | null;
+  nuclei: Nucleus[];
+  aggregate: AggregateMetrics;
+  job_id: string;
+}
+export interface Job {
+  job_id: string;
+  session_id: string;
+  status: string;
+  progress: number;
+  message: string;
+  error: string | null;
+}
+export interface BatchPairMetrics {
+  nucleus_count: number | null;
+  mean_protein: number | null;
+  std_protein: number | null;
+  mean_protein_background_corrected: number | null;
+  std_protein_background_corrected: number | null;
+}
+export interface BatchPair {
+  key: string;
+  nucleus_file: string | null;
+  protein_file: string | null;
+  session_id: string | null;
+  job_id: string | null;
+  status: "paired" | "incomplete" | "error" | "ready";
+  metrics?: BatchPairMetrics;
+  error: string | null;
+}
+export interface BatchSummary {
+  images_processed: number;
+  mean_protein_std: number | null;
+  std_protein_std: number | null;
+  protein_std_values: { key: string; value: number }[];
+  nucleus_count_values: { key: string; value: number }[];
+  protein_mean_values_count: number;
+}
+export interface Batch {
+  batch_id: string;
+  job_id: string;
+  status: "queued" | "running" | "completed" | "error";
+  progress: number;
+  total: number;
+  completed: number;
+  failed: number;
+  pairs: BatchPair[];
+  summary?: BatchSummary;
+  error: string | null;
+}
