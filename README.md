@@ -35,7 +35,7 @@ python src/pipeline_melhorado.py --save-images
 python -m unittest discover -s tests -v
 ```
 
-As alterações estão documentadas em [docs/MELHORIAS_TCC.md](docs/MELHORIAS_TCC.md). O comparativo detalhado, com roteiro para apresentação, está em [docs/COMPARATIVO_IC_VS_TCC.md](docs/COMPARATIVO_IC_VS_TCC.md).
+As alterações estão documentadas em [docs/MELHORIAS_TCC.md](docs/MELHORIAS_TCC.md). O comparativo detalhado, com roteiro para apresentação, está em [docs/COMPARATIVO_IC_VS_TCC.md](docs/COMPARATIVO_IC_VS_TCC.md). O contexto completo para continuidade por outra pessoa ou IA está em [docs/CONTEXTO_PARA_CONTINUIDADE.md](docs/CONTEXTO_PARA_CONTINUIDADE.md).
 
 Para uma tabela simples, própria para mostrar ao orientador, execute `python src/tabela_comparativa.py`. Ela gera `results/tabela_media_proteina_ic_vs_tcc.csv` e `results/tabela_media_proteina_ic_vs_tcc.md`.
 
