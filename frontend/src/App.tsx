@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
@@ -82,6 +81,8 @@ export default function App() {
   const [layer, setLayer] = useState<"nucleus" | "protein" | "mask">("protein");
   const [labels, setLabels] = useState(true);
   const [editId, setEditId] = useState<number | null>(null);
+  const [editMode, setEditMode] = useState<"adjust" | "redraw">("adjust");
+  const [redrawVersion, setRedrawVersion] = useState(0);
   const [editPolygon, setEditPolygon] = useState<[number, number][] | null>(
     null,
   );
@@ -252,6 +253,10 @@ export default function App() {
   }
   async function saveContour() {
     if (!result || !editId || !editPolygon) return;
+    if (editPolygon.length < 3) {
+      setError("Redesenhe o contorno com pelo menos três pontos antes de confirmar.");
+      return;
+    }
     try {
       setResult(
         await edit(result.session_id, {
@@ -264,6 +269,7 @@ export default function App() {
       );
       setEditId(null);
       setEditPolygon(null);
+      setEditMode("adjust");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Contorno inválido");
     }
@@ -603,7 +609,7 @@ export default function App() {
               </h1>
               <p>
                 {result
-                  ? `Amostra ${result.session_id.slice(0, 12)} · revisão ${result.revision}`
+                  ? `Quantificação e revisão manual · versão ${result.revision}`
                   : "Selecione arquivos ou pastas para iniciar o protocolo."}
               </p>
             </div>
@@ -659,21 +665,14 @@ export default function App() {
           {batch ? (
             <BatchSummary
               batch={batch}
-              histogramUrls={{
-                standardDeviation: batchHistogramUrl(
-                  batch.batch_id,
-                  "standard-deviation",
-                ),
-                nuclei: batchHistogramUrl(batch.batch_id, "nuclei"),
-                intensity: batchHistogramUrl(batch.batch_id, "intensity"),
-              }}
+              histogramUrl={(kind) => batchHistogramUrl(batch.batch_id, kind)}
               csvUrl={batchCsvUrl(batch.batch_id)}
             />
           ) : null}
           {result && !batch && showHistogram ? (
             <SessionHistogram
               result={result}
-              histogramUrl={sessionHistogramUrl(result.session_id)}
+              histogramUrl={(kind) => sessionHistogramUrl(result.session_id, kind)}
             />
           ) : null}
           <div className="analysis-grid">
@@ -722,6 +721,8 @@ export default function App() {
                 layer={layer}
                 labels={labels}
                 editId={editId}
+                editMode={editMode}
+                redrawVersion={redrawVersion}
                 onSelect={(id, multi) =>
                   setSelected(
                     multi
@@ -734,68 +735,79 @@ export default function App() {
                 onEditChange={setEditPolygon}
               />
             </section>
-            <MetricsPanel
-              nucleus={selectedNucleus}
-              aggregate={result?.aggregate}
-              revision={result?.revision ?? 0}
-              onAction={(operation) => void apply(operation)}
-              editing={editId !== null}
-              onEdit={() =>
-                selectedNucleus && setEditId(selectedNucleus.nucleus_id)
-              }
-              onSave={() => void saveContour()}
-              onCancel={() => {
-                setEditId(null);
-                setEditPolygon(null);
-              }}
-            />
-          </div>
-          <section className="table-panel">
-            <div className="table-header">
-              <div>
-                <span className="section-label">OBJETOS SEGMENTADOS</span>
-                <strong>
-                  {result
-                    ? `${result.aggregate.nucleus_count ?? 0} núcleos ativos`
-                    : "Nenhum resultado carregado"}
-                </strong>
-              </div>
-              <div className="table-tools">
-                <span className="table-hint">
-                  <Activity size={13} /> Intensidade no canal original
-                </span>
-                <label className="search-field">
-                  <Search size={13} />
-                  <input
-                    placeholder="ID"
-                    value={filter}
-                    onChange={(event) => setFilter(event.target.value)}
-                  />
-                </label>
-                <button
-                  onClick={() => void historyAction(undo)}
-                  disabled={!result}
-                  title="Desfazer"
-                >
-                  <Undo2 size={14} />
-                </button>
-                <button
-                  onClick={() => void historyAction(redo)}
-                  disabled={!result}
-                  title="Refazer"
-                >
-                  <Redo2 size={14} />
-                </button>
-              </div>
+            <div className="review-sidebar">
+              <MetricsPanel
+                nucleus={selectedNucleus}
+                aggregate={result?.aggregate}
+                revision={result?.revision ?? 0}
+                onAction={(operation) => void apply(operation)}
+                editing={editId !== null}
+                editMode={editMode}
+                onEdit={() => {
+                  if (!selectedNucleus) return;
+                  setEditMode("adjust");
+                  setEditId(selectedNucleus.nucleus_id);
+                }}
+                onRedraw={() => {
+                  if (!selectedNucleus) return;
+                  setEditMode("redraw");
+                  setEditId(selectedNucleus.nucleus_id);
+                  setRedrawVersion((version) => version + 1);
+                }}
+                onRestartRedraw={() => setRedrawVersion((version) => version + 1)}
+                onSave={() => void saveContour()}
+                onCancel={() => {
+                  setEditId(null);
+                  setEditPolygon(null);
+                  setEditMode("adjust");
+                }}
+              />
+              <section className="table-panel table-panel-side">
+                <div className="table-header">
+                  <div>
+                    <span className="section-label">NÚCLEOS IDENTIFICADOS</span>
+                    <strong>
+                      {result
+                        ? `${result.aggregate.nucleus_count ?? 0} núcleos ativos`
+                        : "Nenhum resultado carregado"}
+                    </strong>
+                  </div>
+                  <div className="table-tools">
+                    <label className="search-field">
+                      <Search size={13} />
+                      <input
+                        placeholder="ID"
+                        value={filter}
+                        onChange={(event) => setFilter(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      onClick={() => void historyAction(undo)}
+                      disabled={!result}
+                      title="Desfazer"
+                    >
+                      <Undo2 size={14} />
+                    </button>
+                    <button
+                      onClick={() => void historyAction(redo)}
+                      disabled={!result}
+                      title="Refazer"
+                    >
+                      <Redo2 size={14} />
+                    </button>
+                  </div>
+                </div>
+                <NucleiTable
+                  compact
+                  nuclei={visibleNuclei}
+                  selected={selected}
+                  onSelect={(id, multi) =>
+                    setSelected(multi ? [...new Set([...selected, id])] : [id])
+                  }
+                />
+              </section>
             </div>
-            <NucleiTable
-              nuclei={visibleNuclei}
-              selected={selected}
-              onSelect={(id, multi) =>
-                setSelected(multi ? [...new Set([...selected, id])] : [id])
-              }
-            />
-          </section>
+          </div>
         </main>
       </div>
       <footer className="lab-footer">

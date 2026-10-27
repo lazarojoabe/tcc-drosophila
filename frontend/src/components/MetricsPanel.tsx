@@ -5,7 +5,10 @@ interface Props {
   revision: number;
   onAction: (operation: "hide" | "exclude" | "restore") => void;
   editing: boolean;
+  editMode: "adjust" | "redraw";
   onEdit: () => void;
+  onRedraw: () => void;
+  onRestartRedraw: () => void;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -28,7 +31,10 @@ export function MetricsPanel({
   aggregate,
   onAction,
   editing,
+  editMode,
   onEdit,
+  onRedraw,
+  onRestartRedraw,
   onSave,
   onCancel,
 }: Props) {
@@ -42,18 +48,18 @@ export function MetricsPanel({
       </div>
       {aggregate ? (
         <>
-          <h4>Proteína entre núcleos</h4>
+          <h4>Quantificação principal</h4>
           <div className="metrics-grid">
-            <Value label="Média" value={aggregate.mean_protein} />
-            <Value label="Desvio padrão" value={aggregate.std_protein} />
             <Value
-              label="Média corrigida"
+              label="Média proteica corrigida"
               value={aggregate.mean_protein_background_corrected}
             />
             <Value
-              label="DP corrigido"
+              label="DP entre núcleos"
               value={aggregate.std_protein_background_corrected}
             />
+            <Value label="Núcleos ocultos" value={aggregate.hidden_count} />
+            <Value label="Núcleos excluídos" value={aggregate.excluded_count} />
           </div>
         </>
       ) : null}
@@ -72,6 +78,9 @@ export function MetricsPanel({
           <div className="action-row">
             {editing ? (
               <>
+                {editMode === "redraw" ? (
+                  <button onClick={onRestartRedraw}>Recomeçar traço</button>
+                ) : null}
                 <button className="primary" onClick={onSave}>
                   Confirmar
                 </button>
@@ -79,7 +88,10 @@ export function MetricsPanel({
               </>
             ) : (
               <>
-                <button onClick={onEdit}>Editar contorno</button>
+                <button onClick={onEdit}>Ajustar pontos</button>
+                <button className="primary" onClick={onRedraw}>
+                  Redesenhar
+                </button>
                 <button
                   onClick={() =>
                     onAction(nucleus.state === "hidden" ? "restore" : "hide")
@@ -100,35 +112,26 @@ export function MetricsPanel({
               </>
             )}
           </div>
-          <h4>Geometria</h4>
+          <h4>Morfometria</h4>
           <div className="metrics-grid">
-            <Value label="Área" value={`${nucleus.area_px} px²`} />
             <Value
-              label="Área espacial"
+              label="Área"
               value={
-                nucleus.area_um2 ? `${nucleus.area_um2.toFixed(2)} µm²` : null
+                nucleus.area_um2
+                  ? `${nucleus.area_um2.toFixed(2)} µm²`
+                  : `${nucleus.area_px} px²`
               }
             />
-            <Value
-              label="Centroide"
-              value={`${nucleus.centroid_x.toFixed(1)}, ${nucleus.centroid_y.toFixed(1)}`}
-            />
-            <Value label="Perímetro" value={nucleus.perimeter_px} />
-            <Value label="Raio eq." value={nucleus.equivalent_radius_px} />
-            <Value label="Eixo maior" value={nucleus.major_axis_px} />
-            <Value label="Eixo menor" value={nucleus.minor_axis_px} />
+            <Value label="Diâmetro equivalente" value={nucleus.equivalent_diameter_px} />
+            <Value label="Circularidade" value={nucleus.circularity} />
             <Value label="Excentricidade" value={nucleus.eccentricity} />
           </div>
-          <h4>Intensidade individual</h4>
+          <h4>Quantificação individual</h4>
           <div className="metrics-grid">
-            <Value label="Núcleo média" value={nucleus.nucleus_mean} />
-            <Value label="Núcleo mediana" value={nucleus.nucleus_median} />
-            <Value label="Núcleo σ" value={nucleus.nucleus_std} />
-            <Value label="Proteína média" value={nucleus.protein_mean} />
-            <Value label="Proteína mediana" value={nucleus.protein_median} />
-            <Value label="Proteína σ" value={nucleus.protein_std} />
+            <Value label="Proteína corrigida" value={nucleus.protein_mean_background_corrected} />
+            <Value label="Sinal bruto médio" value={nucleus.protein_mean} />
             <Value
-              label="Proteína integrada"
+              label="Sinal integrado"
               value={nucleus.protein_integrated}
             />
             <Value label="Fundo" value={nucleus.background_mean} />

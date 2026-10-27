@@ -17,6 +17,8 @@ interface Props {
   layer: "nucleus" | "protein" | "mask";
   labels: boolean;
   editId: number | null;
+  editMode: "adjust" | "redraw";
+  redrawVersion: number;
   onSelect: (id: number, multi: boolean) => void;
   onEditChange: (polygon: Point[]) => void;
 }
@@ -31,6 +33,8 @@ export function ImageViewer({
   layer,
   labels,
   editId,
+  editMode,
+  redrawVersion,
   onSelect,
   onEditChange,
 }: Props) {
@@ -49,6 +53,7 @@ export function ImageViewer({
     transform: Transform;
   } | null>(null);
   const [handle, setHandle] = useState<number | null>(null);
+  const [isRedrawing, setIsRedrawing] = useState(false);
   const [editingPolygon, setEditingPolygon] = useState<Point[] | null>(null);
   const drawRef = useRef<() => void>(() => undefined);
 
@@ -108,7 +113,7 @@ export function ImageViewer({
           const screen = imageToScreen(point, transform);
           index ? ctx.lineTo(...screen) : ctx.moveTo(...screen);
         });
-        ctx.closePath();
+        if (editMode !== "redraw" || !isRedrawing) ctx.closePath();
         ctx.strokeStyle = selected.includes(n.nucleus_id)
           ? "#facc15"
           : n.state === "hidden"
@@ -133,7 +138,7 @@ export function ImageViewer({
             ctx.fill();
           });
       });
-  }, [editId, editingPolygon, labels, nuclei, selected, transform]);
+  }, [editId, editMode, editingPolygon, isRedrawing, labels, nuclei, selected, transform]);
 
   useEffect(() => {
     drawRef.current = draw;
@@ -177,9 +182,14 @@ export function ImageViewer({
   useEffect(() => {
     const selectedNucleus = nuclei.find((n) => n.nucleus_id === editId);
     setEditingPolygon(
-      selectedNucleus ? selectedNucleus.polygon.map((p) => [p[0], p[1]]) : null,
+      selectedNucleus
+        ? editMode === "redraw"
+          ? []
+          : selectedNucleus.polygon.map((p) => [p[0], p[1]])
+        : null,
     );
-  }, [editId, nuclei]);
+    setIsRedrawing(false);
+  }, [editId, editMode, nuclei, redrawVersion]);
   useEffect(() => {
     if (editingPolygon) onEditChange(editingPolygon);
   }, [editingPolygon, onEditChange]);
@@ -230,6 +240,11 @@ export function ImageViewer({
     event.currentTarget.setPointerCapture(event.pointerId);
     const rect = event.currentTarget.getBoundingClientRect();
     const screen: Point = [event.clientX - rect.left, event.clientY - rect.top];
+    if (editId && editMode === "redraw") {
+      setEditingPolygon([screenToImage(screen, transform)]);
+      setIsRedrawing(true);
+      return;
+    }
     if (editId && editingPolygon) {
       const point = screenToImage(screen, transform);
       const index = editingPolygon.findIndex(
@@ -246,6 +261,16 @@ export function ImageViewer({
     setDrag({ start: [event.clientX, event.clientY], transform });
   }
   function pointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (isRedrawing) {
+      const point = locate(event);
+      setEditingPolygon((current) => {
+        const previous = current?.[current.length - 1];
+        return !previous || Math.hypot(previous[0] - point[0], previous[1] - point[1]) >= 3 / transform.scale
+          ? [...(current ?? []), point]
+          : current;
+      });
+      return;
+    }
     if (handle !== null) {
       const point = locate(event);
       setEditingPolygon((current) =>
@@ -272,6 +297,7 @@ export function ImageViewer({
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
     setHandle(null);
+    setIsRedrawing(false);
     setDrag(null);
   }
   function click(event: React.MouseEvent<HTMLCanvasElement>) {
@@ -286,7 +312,7 @@ export function ImageViewer({
     if (nucleus) onSelect(nucleus.nucleus_id, event.ctrlKey || event.shiftKey);
   }
   function doubleClick(event: React.MouseEvent<HTMLCanvasElement>) {
-    if (!editingPolygon) return;
+    if (!editingPolygon || editMode === "redraw") return;
     const point = locate(event);
     const edge = closestEdge(point, editingPolygon);
     if (!edge || edge.distance > vertexTolerance()) return;
@@ -297,6 +323,12 @@ export function ImageViewer({
     );
   }
   function contextMenu(event: React.MouseEvent<HTMLCanvasElement>) {
+    if (editMode === "redraw") {
+      event.preventDefault();
+      setEditingPolygon([]);
+      setIsRedrawing(false);
+      return;
+    }
     if (!editingPolygon || editingPolygon.length <= 3) return;
     event.preventDefault();
     const point = locate(event);
@@ -371,7 +403,9 @@ export function ImageViewer({
       </div>
       <div className="viewer-help">
         {editId
-          ? "Edição: arraste vértices · duplo clique próximo da borda: adicionar · botão direito no vértice: remover"
+          ? editMode === "redraw"
+            ? "Redesenho livre: clique e arraste sobre a borda do núcleo · botão direito: limpar"
+            : "Ajuste fino: arraste vértices · duplo clique na borda: adicionar · botão direito no vértice: remover"
           : "Roda: zoom preciso · arraste: pan · selecione um núcleo para editar o contorno"}
       </div>
     </div>

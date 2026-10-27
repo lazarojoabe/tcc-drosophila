@@ -343,6 +343,21 @@ def protein_histogram(session_id: str):
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.get("/api/sessions/{session_id}/histogram/{kind}.png")
+def get_session_histogram(session_id: str, kind: str):
+    get_state(session_id)
+    try:
+        return Response(
+            manager.session_histogram(session_id, kind),
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'inline; filename="{kind}-histogram-{session_id}.png"'
+            },
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.get("/api/sessions/{session_id}/images/{kind}.png")
 def session_image(session_id: str, kind: str):
     get_state(session_id)

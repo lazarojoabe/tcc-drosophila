@@ -71,6 +71,8 @@ export interface AggregateMetrics {
   std_protein_background_corrected: number | null;
   mean_nucleus_intensity: number | null;
   std_nucleus_intensity: number | null;
+  mean_protein_intranuclear_std: number | null;
+  std_protein_intranuclear_std: number | null;
 }
 export interface Result {
   session_id: string;
@@ -110,11 +112,14 @@ export interface BatchPair {
 }
 export interface BatchSummary {
   images_processed: number;
-  mean_protein_std: number | null;
-  std_protein_std: number | null;
-  protein_std_values: { key: string; value: number }[];
+  nuclei_analyzed: number;
+  mean_corrected_protein: number | null;
+  std_corrected_protein: number | null;
+  mean_nucleus_intensity: number | null;
+  std_nucleus_intensity: number | null;
+  mean_protein_intranuclear_std: number | null;
+  std_protein_intranuclear_std: number | null;
   nucleus_count_values: { key: string; value: number }[];
-  protein_mean_values_count: number;
 }
 export interface Batch {
   batch_id: string;

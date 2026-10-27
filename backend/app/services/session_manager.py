@@ -26,8 +26,6 @@ from ..processing.image_io import (
 )
 from ..processing.metrics import (
     distribution_histogram_png,
-    protein_mean_histogram_png,
-    standard_deviation_histogram_png,
 )
 from ..repositories.sqlite import SQLiteRepository
 
@@ -328,37 +326,70 @@ class SessionManager:
         }
 
     def _batch_summary(self, batch: BatchState) -> dict[str, Any]:
-        values: list[dict[str, Any]] = []
         nucleus_counts: list[dict[str, Any]] = []
-        intensity_values: list[float] = []
+        protein_std_values: list[dict[str, Any]] = []
+        corrected_intensities: list[float] = []
+        nucleus_intensities: list[float] = []
+        intranuclear_standard_deviations: list[float] = []
         for pair in batch.pairs:
             metrics = self._batch_pair_metrics(pair)
-            if metrics is not None and metrics.get("std_protein") is not None:
-                values.append(
+            if metrics is None:
+                continue
+            nucleus_counts.append(
+                {"key": pair["key"], "value": int(metrics["nucleus_count"] or 0)}
+            )
+            if metrics.get("std_protein") is not None:
+                protein_std_values.append(
                     {"key": pair["key"], "value": float(metrics["std_protein"])}
                 )
-                nucleus_counts.append(
-                    {"key": pair["key"], "value": int(metrics["nucleus_count"] or 0)}
-                )
-                state = self.get(pair["session_id"])
-                intensity_values.extend(
-                    float(item["protein_mean"])
-                    for item in state.nuclei
-                    if item.get("state") != "excluded"
-                    and item.get("protein_mean") is not None
-                )
-        standard_deviations = [item["value"] for item in values]
+            state = self.get(pair["session_id"])
+            corrected_intensities.extend(
+                float(item["protein_mean_background_corrected"])
+                for item in state.nuclei
+                if item.get("state") != "excluded"
+                and item.get("protein_mean_background_corrected") is not None
+            )
+            nucleus_intensities.extend(
+                float(item["nucleus_mean"])
+                for item in state.nuclei
+                if item.get("state") != "excluded"
+                and item.get("nucleus_mean") is not None
+            )
+            intranuclear_standard_deviations.extend(
+                float(item["protein_std"])
+                for item in state.nuclei
+                if item.get("state") != "excluded"
+                and item.get("protein_std") is not None
+            )
         return {
-            "images_processed": len(values),
-            "mean_protein_std": (
-                float(np.mean(standard_deviations)) if standard_deviations else None
+            "images_processed": len(nucleus_counts),
+            "nuclei_analyzed": len(corrected_intensities),
+            "mean_corrected_protein": (
+                float(np.mean(corrected_intensities)) if corrected_intensities else None
             ),
-            "std_protein_std": (
-                float(np.std(standard_deviations)) if standard_deviations else None
+            "std_corrected_protein": (
+                float(np.std(corrected_intensities)) if corrected_intensities else None
             ),
-            "protein_std_values": values,
+            "mean_nucleus_intensity": (
+                float(np.mean(nucleus_intensities)) if nucleus_intensities else None
+            ),
+            "std_nucleus_intensity": (
+                float(np.std(nucleus_intensities)) if nucleus_intensities else None
+            ),
+            "mean_protein_intranuclear_std": (
+                float(np.mean(intranuclear_standard_deviations))
+                if intranuclear_standard_deviations
+                else None
+            ),
+            "std_protein_intranuclear_std": (
+                float(np.std(intranuclear_standard_deviations))
+                if intranuclear_standard_deviations
+                else None
+            ),
+            # Mantido no payload para compatibilidade com análises externas;
+            # a interface não o promove como resultado principal.
+            "protein_std_values": protein_std_values,
             "nucleus_count_values": nucleus_counts,
-            "protein_mean_values_count": len(intensity_values),
         }
 
     def batch_standard_deviation_histogram(self, batch_id: str) -> bytes:
@@ -370,8 +401,12 @@ class SessionManager:
             raise KeyError(batch_id)
         summary = self._batch_summary(batch)
         if kind == "standard-deviation":
-            values = [item["value"] for item in summary["protein_std_values"]]
-            return standard_deviation_histogram_png(values)
+            values = self._batch_histogram_values(batch, "protein_std")
+            return distribution_histogram_png(
+                values,
+                "Distribuição do desvio padrão intranuclear proteico no lote",
+                "Desvio padrão da intensidade proteica em cada núcleo",
+            )
         if kind == "nuclei":
             values = [item["value"] for item in summary["nucleus_count_values"]]
             return distribution_histogram_png(
@@ -379,25 +414,37 @@ class SessionManager:
                 "Distribuicao do numero de nucleos por imagem",
                 "Nucleos detectados por imagem",
             )
-        if kind == "intensity":
-            values: list[float] = []
-            for pair in batch.pairs:
-                metrics = self._batch_pair_metrics(pair)
-                if metrics is None:
-                    continue
-                state = self.get(pair["session_id"])
-                values.extend(
-                    float(item["protein_mean"])
-                    for item in state.nuclei
-                    if item.get("state") != "excluded"
-                    and item.get("protein_mean") is not None
-                )
+        if kind == "protein":
+            values = self._batch_histogram_values(
+                batch, "protein_mean_background_corrected"
+            )
             return distribution_histogram_png(
                 values,
-                "Distribuicao da intensidade proteica no lote",
-                "Intensidade media da proteina por nucleo",
+                "Distribuição da intensidade proteica corrigida no lote",
+                "Intensidade média da proteína corrigida pelo fundo",
+            )
+        if kind == "nucleus":
+            values = self._batch_histogram_values(batch, "nucleus_mean")
+            return distribution_histogram_png(
+                values,
+                "Distribuição da intensidade nuclear no lote",
+                "Intensidade média do núcleo",
             )
         raise ValueError(f"Tipo de histograma desconhecido: {kind}")
+
+    def _batch_histogram_values(self, batch: BatchState, metric: str) -> list[float]:
+        values: list[float] = []
+        for pair in batch.pairs:
+            if self._batch_pair_metrics(pair) is None:
+                continue
+            state = self.get(pair["session_id"])
+            with state.lock:
+                values.extend(
+                    float(item[metric])
+                    for item in state.nuclei
+                    if item.get("state") != "excluded" and item.get(metric) is not None
+                )
+        return values
 
     def _run_job(
         self,
@@ -650,15 +697,38 @@ class SessionManager:
         return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
     def protein_mean_histogram(self, session_id: str) -> bytes:
+        return self.session_histogram(session_id, "protein")
+
+    def session_histogram(self, session_id: str, kind: str) -> bytes:
         state = self.get(session_id)
+        specifications = {
+            "protein": (
+                "protein_mean_background_corrected",
+                "Distribuição da intensidade proteica corrigida por núcleo",
+                "Intensidade média da proteína corrigida pelo fundo",
+            ),
+            "nucleus": (
+                "nucleus_mean",
+                "Distribuição da intensidade nuclear por núcleo",
+                "Intensidade média do núcleo",
+            ),
+            "standard-deviation": (
+                "protein_std",
+                "Distribuição do desvio padrão intranuclear proteico",
+                "Desvio padrão da intensidade proteica em cada núcleo",
+            ),
+        }
+        if kind not in specifications:
+            raise ValueError(f"Tipo de histograma desconhecido: {kind}")
+        metric, title, x_label = specifications[kind]
         with state.lock:
             values = [
-                float(item["protein_mean"])
+                float(item[metric])
                 for item in state.nuclei
                 if item.get("state") != "excluded"
-                and item.get("protein_mean") is not None
+                and item.get(metric) is not None
             ]
-        return protein_mean_histogram_png(values)
+        return distribution_histogram_png(values, title, x_label)
 
     def image_bytes(self, session_id: str, kind: str) -> bytes:
         state = self.get(session_id)

@@ -3,8 +3,9 @@ interface Props {
   nuclei: Nucleus[];
   selected: number[];
   onSelect: (id: number, multi: boolean) => void;
+  compact?: boolean;
 }
-export function NucleiTable({ nuclei, selected, onSelect }: Props) {
+export function NucleiTable({ nuclei, selected, onSelect, compact = false }: Props) {
   return (
     <div className="table-wrap">
       <table>
@@ -12,9 +13,9 @@ export function NucleiTable({ nuclei, selected, onSelect }: Props) {
           <tr>
             <th>ID</th>
             <th>Estado</th>
-            <th>Área px</th>
-            <th>Prot. média</th>
-            <th>Prot. corrigida</th>
+            <th>Intensidade corrigida</th>
+            {!compact ? <th>Área</th> : null}
+            {!compact ? <th>Circularidade</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -28,9 +29,11 @@ export function NucleiTable({ nuclei, selected, onSelect }: Props) {
               <td>
                 <span className={`state state-${n.state}`}>{n.state}</span>
               </td>
-              <td>{n.area_px}</td>
-              <td>{n.protein_mean?.toFixed(2) ?? "—"}</td>
               <td>{n.protein_mean_background_corrected?.toFixed(2) ?? "—"}</td>
+              {!compact ? (
+                <td>{n.area_um2 ? `${n.area_um2.toFixed(2)} µm²` : `${n.area_px} px²`}</td>
+              ) : null}
+              {!compact ? <td>{n.circularity?.toFixed(3) ?? "—"}</td> : null}
             </tr>
           ))}
         </tbody>

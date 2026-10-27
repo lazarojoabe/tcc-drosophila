@@ -1,5 +1,7 @@
 import type { Batch, Config, Job, Result, Session } from "./types";
 
+export type HistogramKind = "protein" | "nucleus" | "standard-deviation";
+
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${url}`, init);
@@ -40,11 +42,11 @@ export function createBatch(
 export const getBatch = (id: string) => request<Batch>(`/batches/${id}`);
 export const batchHistogramUrl = (
   id: string,
-  kind: "standard-deviation" | "nuclei" | "intensity" = "standard-deviation",
+  kind: HistogramKind,
 ) => `${API}/batches/${id}/histogram/${kind}.png`;
 export const batchCsvUrl = (id: string) => `${API}/batches/${id}/export.csv`;
-export const sessionHistogramUrl = (id: string) =>
-  `${API}/sessions/${id}/protein-histogram.png`;
+export const sessionHistogramUrl = (id: string, kind: HistogramKind) =>
+  `${API}/sessions/${id}/histogram/${kind}.png`;
 export const getResult = (id: string) =>
   request<Result>(`/sessions/${id}/result`);
 export const getJob = (id: string) => request<Job>(`/jobs/${id}`);

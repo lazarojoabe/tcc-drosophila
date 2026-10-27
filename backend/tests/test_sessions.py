@@ -38,11 +38,10 @@ class SessionTests(unittest.TestCase):
             summary = manager.batch_result(batch.batch_id)["summary"]
             self.assertEqual(summary["images_processed"], 1)
             self.assertEqual(len(summary["protein_std_values"]), 1)
-            self.assertTrue(
-                manager.batch_standard_deviation_histogram(batch.batch_id).startswith(
-                    b"\x89PNG"
+            for kind in ("protein", "nucleus", "standard-deviation"):
+                self.assertTrue(
+                    manager.batch_histogram(batch.batch_id, kind).startswith(b"\x89PNG")
                 )
-            )
             self.assertIn(b"std_protein", manager.export_batch_csv(batch.batch_id))
 
     def test_event_cursor_can_start_at_end_and_receive_future_event(self) -> None:
@@ -82,6 +81,12 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(
                 manager.protein_mean_histogram(state.session_id).startswith(b"\x89PNG")
             )
+            for kind in ("protein", "nucleus", "standard-deviation"):
+                self.assertTrue(
+                    manager.session_histogram(state.session_id, kind).startswith(
+                        b"\x89PNG"
+                    )
+                )
             original = manager.result(state.session_id)
             changed = manager.apply_edit(
                 state.session_id,

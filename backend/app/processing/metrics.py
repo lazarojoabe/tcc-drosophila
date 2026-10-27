@@ -120,42 +120,67 @@ def aggregate_metrics(nuclei: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "mean_nucleus_intensity": mean("nucleus_mean"),
         "std_nucleus_intensity": standard_deviation("nucleus_mean"),
+        "mean_protein_intranuclear_std": mean("protein_std"),
+        "std_protein_intranuclear_std": standard_deviation("protein_std"),
     }
 
 
+def _histogram_bins(values: np.ndarray) -> int:
+    """Escolhe classes estáveis pela regra de Freedman–Diaconis."""
+
+    if values.size <= 1 or np.ptp(values) == 0:
+        return 1
+    first_quartile, third_quartile = np.percentile(values, [25, 75])
+    interquartile_range = third_quartile - first_quartile
+    if interquartile_range > 0:
+        width = 2 * interquartile_range / np.cbrt(values.size)
+        if width > 0:
+            bins = int(np.ceil(np.ptp(values) / width))
+            if 3 <= bins <= 40:
+                return bins
+    return min(24, max(3, int(np.ceil(np.sqrt(values.size)))))
+
+
 def distribution_histogram_png(values: list[float], title: str, x_label: str) -> bytes:
-    """Gera um histograma PNG científico com Matplotlib, média e DP."""
+    """Gera um histograma científico com classes adaptativas e resumo robusto."""
 
     figure = Figure(figsize=(10, 5.2), dpi=140, facecolor="#f8fafb")
     axis = figure.add_subplot(111)
     axis.set_facecolor("#ffffff")
     if values:
         array = np.asarray(values, dtype=np.float64)
-        bins = (
-            1 if array.size == 1 else min(16, max(5, int(np.ceil(np.sqrt(array.size)))))
-        )
+        bins = _histogram_bins(array)
         mean = float(array.mean())
+        median = float(np.median(array))
         deviation = float(array.std())
+        first_quartile, third_quartile = np.percentile(array, [25, 75])
         axis.hist(
             array,
             bins=bins,
-            color="#4c8797",
-            edgecolor="#1d5064",
-            alpha=0.88,
-            linewidth=0.8,
+            color="#3e7d91",
+            edgecolor="#173f55",
+            alpha=0.9,
+            linewidth=0.9,
         )
         axis.axvspan(
-            mean - deviation,
-            mean + deviation,
+            first_quartile,
+            third_quartile,
             color="#d7934e",
             alpha=0.16,
-            label="média ± 1 DP",
+            label="intervalo interquartil",
         )
         axis.axvline(mean, color="#b86f2d", linewidth=2, label=f"média = {mean:.3f}")
+        axis.axvline(
+            median,
+            color="#365d70",
+            linestyle="--",
+            linewidth=1.6,
+            label=f"mediana = {median:.3f}",
+        )
         axis.text(
             0.99,
             0.96,
-            f"DP = {deviation:.3f}\nn = {array.size}",
+            f"n = {array.size}\nDP = {deviation:.3f}\nIQR = {third_quartile - first_quartile:.3f}",
             transform=axis.transAxes,
             ha="right",
             va="top",
@@ -167,7 +192,8 @@ def distribution_histogram_png(values: list[float], title: str, x_label: str) ->
                 "boxstyle": "round,pad=.4",
             },
         )
-        axis.legend(frameon=False, loc="upper left")
+        axis.margins(x=0.04)
+        axis.legend(frameon=False, loc="upper left", fontsize=9)
     else:
         axis.text(
             0.5,
@@ -208,6 +234,6 @@ def standard_deviation_histogram_png(values: list[float]) -> bytes:
 def protein_mean_histogram_png(values: list[float]) -> bytes:
     return distribution_histogram_png(
         values,
-        "Distribuicao da intensidade proteica por nucleo",
-        "Intensidade media da proteina",
+        "Distribuição da intensidade proteica corrigida por núcleo",
+        "Intensidade média da proteína corrigida pelo fundo",
     )
