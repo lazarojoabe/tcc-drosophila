@@ -39,6 +39,7 @@ class EditRequest(BaseModel):
     base_revision: int = Field(ge=0)
     polygon: list[list[float]] | None = None
     nucleus_id: int | None = Field(default=None, ge=1)
+    reviewer: str | None = Field(default=None, max_length=120)
 
     @field_validator("polygon")
     @classmethod
@@ -54,11 +55,21 @@ class EditRequest(BaseModel):
 
 class RevisionRequest(BaseModel):
     base_revision: int = Field(ge=0)
+    reviewer: str | None = Field(default=None, max_length=120)
 
 
 class ReprocessRequest(BaseModel):
     config: SegmentationConfig | None = None
     base_revision: int = Field(ge=0)
+    reviewer: str | None = Field(default=None, max_length=120)
+
+
+class AccessCodeRequest(BaseModel):
+    access_code: str = Field(min_length=1, max_length=256)
+
+
+class SaveRequest(BaseModel):
+    reviewer: str | None = Field(default=None, max_length=120)
 
 
 class ImageDescriptor(BaseModel):

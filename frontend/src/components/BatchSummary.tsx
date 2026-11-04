@@ -6,6 +6,7 @@ interface Props {
   batch: Batch;
   histogramUrl: (kind: HistogramKind) => string;
   csvUrl: string;
+  packageUrl: string;
 }
 
 const options: Record<HistogramKind, { title: string; description: string }> = {
@@ -30,7 +31,7 @@ function value(number: number | null | undefined) {
   return number === null || number === undefined ? "—" : number.toFixed(3);
 }
 
-export function BatchSummary({ batch, histogramUrl, csvUrl }: Props) {
+export function BatchSummary({ batch, histogramUrl, csvUrl, packageUrl }: Props) {
   const [kind, setKind] = useState<HistogramKind>("protein");
   const summary = batch.summary;
   const option = options[kind];
@@ -60,7 +61,7 @@ export function BatchSummary({ batch, histogramUrl, csvUrl }: Props) {
     <section className="batch-summary">
       <div className="batch-summary-heading">
         <div>
-          <span className="section-label">HISTOGRAMA CONSOLIDADO DO LOTE</span>
+          <span className="section-label">HISTOGRAMA CONSOLIDADO · TODAS AS IMAGENS DA PASTA</span>
           <strong>{option.title}</strong>
           <p>{option.description}</p>
         </div>
@@ -93,11 +94,14 @@ export function BatchSummary({ batch, histogramUrl, csvUrl }: Props) {
           <a className="export-link" href={histogramUrl(kind)} download>
             Histograma PNG
           </a>
+          <a className="export-link primary" href={packageUrl} download>
+            Baixar lote completo (ZIP)
+          </a>
         </div>
       </div>
       <div className="batch-summary-body">
         <img
-          src={`${histogramUrl(kind)}?progress=${batch.progress}`}
+          src={`${histogramUrl(kind)}${histogramUrl(kind).includes("?") ? "&" : "?"}progress=${batch.progress}`}
           alt={`${option.title} do lote`}
         />
         <div className="batch-summary-metrics">

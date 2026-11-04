@@ -80,7 +80,32 @@ limite de tamanho e não aceitam caminhos arbitrários.
 O processamento é assíncrono e informado por SSE. A interface permite zoom,
 pan, seleção no canvas e na tabela, consulta das métricas, ocultar, excluir,
 restaurar, editar vértices do contorno, undo/redo e exportação CSV/JSON.
+O botão **Salvar e baixar** grava a sessão e baixa um pacote ZIP autocontido com
+os arquivos originais, imagens normalizadas, máscara original e revisada,
+overlays com os contornos/IDs, métricas, auditoria, revisões e histogramas de
+proteína, núcleo e desvio padrão. No processamento em lote, **Baixar lote
+completo (ZIP)** reúne ainda os histogramas consolidados e o pacote de cada par.
 Cada edição usa `base_revision`; conflitos retornam HTTP 409.
+
+### Persistência e rastreabilidade
+
+Não é necessário configurar banco de dados. Cada análise é guardada localmente
+em `.nuclei_data/<id-da-sessão>/`, contendo os arquivos de entrada, o estado
+atual (`session.json`), as matrizes de segmentação (`analysis.npz`), fotografias
+das revisões e o diário de auditoria (`audit.jsonl`). Ao reiniciar o backend, as
+sessões concluídas são restauradas e podem ser reabertas pela seção **Sessões
+salvas** da interface.
+
+O diário registra criação, processamento, ajustes de contorno, exclusões,
+restaurações, desfazer/refazer e reprocessamentos, com horário, revisão e o
+responsável informado na interface. O mesmo histórico também acompanha a
+exportação JSON. Para armazenar essas análises em outro local, defina a
+variável de ambiente `NUCLEI_DATA_DIR` antes de iniciar o backend.
+
+Ao redesenhar um núcleo, um traço que se cruza é normalizado
+automaticamente para um contorno externo válido antes da quantificação. A
+correção fica registrada na trilha de auditoria, evitando que um deslize no
+desenho interrompa a revisão.
 
 Entradas com nomes `_border`, `_mask`, `_overlay`, `binarizada`, `gaussian` ou
 `filled` são marcadas como derivadas e geram um aviso, pois overlays não
@@ -99,3 +124,6 @@ npm run build
 
 As definições matemáticas das métricas, a arquitetura e as limitações
 biológicas permanecem documentadas em `docs/MELHORIAS_TCC.md`.
+
+Para disponibilizar a plataforma ao grupo de validação, siga o roteiro de
+[publicação com Vercel e Railway](docs/DEPLOYMENT.md).

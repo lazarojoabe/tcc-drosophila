@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from backend.app.models.schemas import SegmentationConfig
-from backend.app.processing.algorithm import process_arrays, validate_polygon
+from backend.app.processing.algorithm import normalize_polygon, process_arrays, validate_polygon
 from backend.app.processing.metrics import aggregate_metrics
 
 
@@ -30,8 +30,11 @@ class ProcessingTests(unittest.TestCase):
 
     def test_polygon_bounds_and_self_intersection(self) -> None:
         validate_polygon([[1, 1], [10, 1], [10, 10], [1, 10]], 20, 20)
-        with self.assertRaises(ValueError):
-            validate_polygon([[1, 1], [10, 10], [1, 10], [10, 1]], 20, 20)
+        corrected, auto_corrected = normalize_polygon(
+            [[1, 1], [10, 10], [1, 10], [10, 1]], 20, 20
+        )
+        self.assertTrue(auto_corrected)
+        self.assertGreaterEqual(len(corrected), 3)
         with self.assertRaises(ValueError):
             validate_polygon([[-1, 1], [10, 1], [10, 10]], 20, 20)
 

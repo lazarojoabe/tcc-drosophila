@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,18 +17,20 @@ from typing import Any, Iterator
 import numpy as np
 
 from ..models.schemas import ImageDescriptor, SegmentationConfig
-from ..processing.algorithm import process_arrays, recompute_nucleus, validate_polygon
+from ..processing.algorithm import normalize_polygon, process_arrays, recompute_nucleus
 from ..processing.image_io import (
     ImageInfo,
     decode_image,
     mask_png,
     preview_png,
+    review_mask_png,
+    review_overlay_png,
     safe_filename,
 )
 from ..processing.metrics import (
     distribution_histogram_png,
 )
-from ..repositories.sqlite import SQLiteRepository
+from ..repositories.filesystem import FilesystemRepository
 
 
 def utc_now() -> str:
@@ -78,12 +81,10 @@ class BatchState:
 
 
 class SessionManager:
-    def __init__(
-        self, data_dir: Path, repository: SQLiteRepository | None = None
-    ) -> None:
+    def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.repository = repository or SQLiteRepository(data_dir / "analysis.sqlite3")
+        self.repository = FilesystemRepository(data_dir)
         self.executor = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="nuclei-worker"
         )
@@ -95,6 +96,7 @@ class SessionManager:
         self.batches: dict[str, BatchState] = {}
         self.events: dict[str, list[dict[str, Any]]] = {}
         self.lock = threading.RLock()
+        self._restore_sessions()
 
     def create_session(
         self,
@@ -170,17 +172,11 @@ class SessionManager:
             self.sessions[session_id] = state
             self.jobs[job_id] = job
             self.events[session_id] = []
-        self.repository.save_session(
-            session_id,
-            job_id,
-            0,
-            "queued",
-            model_dump(config),
-            {
-                "warnings": warnings,
-                "images": [model_dump(item) for item in state.descriptors],
-            },
-            utc_now(),
+        self._persist(state, operation="session_created")
+        self._record_audit(
+            state,
+            "session_created",
+            {"input_files": state.input_files, "source": "upload"},
         )
         self._emit(session_id, job)
         self.executor.submit(self._run_job, state, job, nucleus_image, protein_image)
@@ -473,7 +469,12 @@ class SessionManager:
                 100,
                 "Processamento concluído",
             )
-            self._persist(state)
+            self._persist(state, operation="processing_completed")
+            self._record_audit(
+                state,
+                "processing_completed",
+                {"nuclei_detected": len(state.nuclei)},
+            )
             self._emit(state.session_id, job)
         except Exception as error:  # pragma: no cover - caminho exercitado por endpoint
             state.status = "error"
@@ -483,7 +484,10 @@ class SessionManager:
                 "Falha no processamento",
                 str(error),
             )
-            self._persist(state)
+            self._persist(state, operation="processing_failed")
+            self._record_audit(
+                state, "processing_failed", {"error": str(error)}
+            )
             self._emit(state.session_id, job)
 
     def _emit(self, session_id: str, job: Job) -> None:
@@ -524,6 +528,7 @@ class SessionManager:
             affected = request.nucleus_ids or (
                 [request.nucleus_id] if request.nucleus_id else []
             )
+            audit_details: dict[str, Any] = {"nucleus_ids": affected}
             by_id = {item["nucleus_id"]: item for item in state.nuclei}
             if request.operation == "edit_contour":
                 if len(affected) != 1 or request.polygon is None:
@@ -535,7 +540,7 @@ class SessionManager:
                     or state.protein_image is None
                 ):
                     raise KeyError("Núcleo não encontrado")
-                validate_polygon(
+                polygon, auto_corrected = normalize_polygon(
                     request.polygon, state.labels.shape[1], state.labels.shape[0]
                 )
                 by_id[affected[0]] = recompute_nucleus(
@@ -544,7 +549,13 @@ class SessionManager:
                     state.nucleus_image.astype(np.float32),
                     state.protein_image.astype(np.float32),
                     state.config,
-                    request.polygon,
+                    polygon,
+                )
+                audit_details.update(
+                    {
+                        "contour_points": len(polygon),
+                        "contour_auto_corrected": auto_corrected,
+                    }
                 )
             else:
                 if not affected:
@@ -566,18 +577,18 @@ class SessionManager:
             state.revision += 1
             state.history.append(before)
             state.redo_stack.clear()
-            self.repository.append_history(
-                session_id,
-                state.revision,
-                request.operation,
-                {"nucleus_ids": affected},
-                utc_now(),
+            self._persist(state, operation=request.operation)
+            self._record_audit(
+                state, request.operation, audit_details, request.reviewer
             )
-            self._persist(state)
             return self.result(session_id)
 
     def undo(
-        self, session_id: str, revision: int, redo: bool = False
+        self,
+        session_id: str,
+        revision: int,
+        redo: bool = False,
+        reviewer: str | None = None,
     ) -> dict[str, Any]:
         state = self.get(session_id)
         with state.lock:
@@ -594,11 +605,17 @@ class SessionManager:
             (state.history if redo else state.redo_stack).append(current)
             self._restore_snapshot(state, target)
             state.revision += 1
-            self._persist(state)
+            operation = "redo" if redo else "undo"
+            self._persist(state, operation=operation)
+            self._record_audit(state, operation, {}, reviewer)
             return self.result(session_id)
 
     def reprocess(
-        self, session_id: str, revision: int, config: SegmentationConfig | None = None
+        self,
+        session_id: str,
+        revision: int,
+        config: SegmentationConfig | None = None,
+        reviewer: str | None = None,
     ) -> Job:
         state = self.get(session_id)
         with state.lock:
@@ -616,7 +633,13 @@ class SessionManager:
             state.job_id = job_id
             with self.lock:
                 self.jobs[job_id] = job
-            self._persist(state)
+            self._persist(state, operation="reprocess_requested")
+            self._record_audit(
+                state,
+                "reprocess_requested",
+                {"config": model_dump(state.config)},
+                reviewer,
+            )
             self.executor.submit(
                 self._run_job, state, job, state.nucleus_image, state.protein_image
             )
@@ -691,10 +714,139 @@ class SessionManager:
             )
         return output.getvalue().encode("utf-8-sig")
 
+    def export_batch_package(self, batch_id: str) -> bytes:
+        """Exporta o lote consolidado e cada sessão individual em um único ZIP."""
+
+        batch = self.batches.get(batch_id)
+        if batch is None:
+            raise KeyError(batch_id)
+        output = io.BytesIO()
+        with zipfile.ZipFile(
+            output, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+        ) as archive:
+            archive.writestr(
+                "README.txt",
+                (
+                    "Pacote de processamento em lote\n\n"
+                    "batch.json e batch.csv contêm o resumo e as métricas por par.\n"
+                    "histograms/ contém os histogramas consolidados de proteína, núcleo e DP.\n"
+                    "sessions/<par>/ contém o pacote completo de cada imagem, incluindo\n"
+                    "originais, prévias, máscara, sobreposição, métricas e auditoria.\n"
+                ),
+            )
+            archive.writestr(
+                "batch.json",
+                json.dumps(self.batch_result(batch_id), ensure_ascii=False, indent=2),
+            )
+            archive.writestr("batch.csv", self.export_batch_csv(batch_id))
+            for kind in ("protein", "nucleus", "standard-deviation"):
+                archive.writestr(
+                    f"histograms/{kind}.png", self.batch_histogram(batch_id, kind)
+                )
+            for pair in batch.pairs:
+                session_id = pair.get("session_id")
+                if not session_id:
+                    continue
+                state = self.sessions.get(session_id)
+                if state is None or state.status != "ready":
+                    continue
+                key = safe_filename(f"{pair['key']}.png")[:-4]
+                package = self.export_package(session_id)
+                with zipfile.ZipFile(io.BytesIO(package)) as session_archive:
+                    for item in session_archive.infolist():
+                        if item.is_dir():
+                            continue
+                        archive.writestr(
+                            f"sessions/{key}/{item.filename}",
+                            session_archive.read(item),
+                        )
+        return output.getvalue()
+
     def export_json(self, session_id: str) -> bytes:
         state = self.get(session_id)
-        payload = {**self.result(session_id), "history": state.history}
+        payload = {
+            **self.result(session_id),
+            "history": state.history,
+            "audit": self.audit_history(session_id),
+        }
         return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+    def export_package(self, session_id: str) -> bytes:
+        """Exporta uma fotografia completa, portátil e auditável da análise."""
+
+        state = self.get(session_id)
+        directory = self.repository.session_dir(session_id)
+        output = io.BytesIO()
+        with zipfile.ZipFile(
+            output, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+        ) as archive:
+            archive.writestr(
+                "README.txt",
+                (
+                    "Pacote de análise morfológica e quantificação\n"
+                    "\n"
+                    "analysis.json: resultado atual, configuração e histórico.\n"
+                    "nuclei.csv: métricas tabulares por núcleo (sem o polígono).\n"
+                    "audit.jsonl: trilha de auditoria das operações realizadas.\n"
+                    "histograms/: histogramas PNG individuais da sessão.\n"
+                    "images/: prévias normalizadas, máscara e sobreposição de revisão.\n"
+                    "original/: arquivos originais usados na análise.\n"
+                    "revisions/: fotografias imutáveis de cada revisão persistida.\n"
+                ),
+            )
+            archive.writestr("analysis.json", self.export_json(session_id))
+            archive.writestr("nuclei.csv", self.export_csv(session_id))
+            audit = self.audit_history(session_id)
+            archive.writestr(
+                "audit.jsonl",
+                "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in audit),
+            )
+
+            histogram_names = {
+                "protein": "histograms/protein.png",
+                "nucleus": "histograms/nucleus.png",
+                "standard-deviation": "histograms/standard-deviation.png",
+            }
+            for kind, name in histogram_names.items():
+                archive.writestr(name, self.session_histogram(session_id, kind))
+
+            for kind in ("nucleus", "protein", "mask"):
+                archive.writestr(f"images/{kind}.png", self.image_bytes(session_id, kind))
+            with state.lock:
+                if state.nucleus_image is not None:
+                    archive.writestr(
+                        "images/review-overlay.png",
+                        review_overlay_png(
+                            state.nucleus_image,
+                            state.config.nucleus_channel,
+                            state.nuclei,
+                        ),
+                    )
+                if state.protein_image is not None:
+                    archive.writestr(
+                        "images/protein-review-overlay.png",
+                        review_overlay_png(
+                            state.protein_image,
+                            state.config.protein_channel,
+                            state.nuclei,
+                        ),
+                    )
+                if state.labels is not None:
+                    archive.writestr(
+                        "images/review-mask.png",
+                        review_mask_png(state.labels.shape[:2], state.nuclei),
+                    )
+
+            for role, filename in state.input_files.items():
+                source = directory / filename
+                if source.is_file():
+                    archive.writestr(f"original/{role}-{safe_filename(filename)}", source.read_bytes())
+
+            revisions = directory / "revisions"
+            if revisions.is_dir():
+                for revision in sorted(revisions.glob("revision-*.json")):
+                    archive.writestr(f"revisions/{revision.name}", revision.read_bytes())
+        return output.getvalue()
 
     def protein_mean_histogram(self, session_id: str) -> bytes:
         return self.session_histogram(session_id, "protein")
@@ -764,18 +916,161 @@ class SessionManager:
             else None
         )
 
-    def _persist(self, state: SessionState) -> None:
-        self.repository.update_session(
-            state.session_id,
-            state.revision,
-            state.status,
-            model_dump(state.config),
-            {
-                "warnings": state.warnings,
-                "images": [model_dump(item) for item in state.descriptors],
-            },
-            utc_now(),
+    def _persist(self, state: SessionState, operation: str = "state_saved") -> None:
+        """Grava estado atual e uma fotografia imutável da revisão em arquivos."""
+
+        now = utc_now()
+        job = self.jobs.get(state.job_id, Job(state.job_id, state.session_id))
+        result = {
+            "session_id": state.session_id,
+            "revision": state.revision,
+            "status": state.status,
+            "config": model_dump(state.config),
+            "warnings": state.warnings,
+            "shape": self._shape(state),
+            "nuclei": state.nuclei,
+            "aggregate": state.aggregate,
+            "job_id": state.job_id,
+        }
+        payload = {
+            "schema_version": 1,
+            "saved_at": now,
+            "result": result,
+            "job": job_payload(job),
+            "descriptors": [model_dump(item) for item in state.descriptors],
+            "input_files": state.input_files,
+            "history": state.history,
+            "redo_stack": state.redo_stack,
+        }
+        self.repository.save_state(
+            state.session_id, payload, state.labels, state.mask
         )
+        self.repository.save_revision(
+            state.session_id, state.revision, result, operation, now
+        )
+
+    def _record_audit(
+        self,
+        state: SessionState,
+        operation: str,
+        details: dict[str, Any],
+        reviewer: str | None = None,
+    ) -> None:
+        self.repository.append_audit(
+            state.session_id,
+            {
+                "timestamp": utc_now(),
+                "revision": state.revision,
+                "operation": operation,
+                "reviewer": reviewer.strip() if reviewer and reviewer.strip() else "Não informado",
+                "details": details,
+            },
+        )
+
+    def audit_history(self, session_id: str) -> list[dict[str, Any]]:
+        self.get(session_id)
+        return self.repository.history(session_id)
+
+    def save(self, session_id: str, reviewer: str | None = None) -> dict[str, Any]:
+        """Força uma fotografia do estado atual sem criar uma nova revisão."""
+
+        state = self.get(session_id)
+        with state.lock:
+            self._persist(state, operation="manual_save")
+            self._record_audit(state, "manual_save", {}, reviewer)
+            return self.result(session_id)
+
+    def save_batch(self, batch_id: str, reviewer: str | None = None) -> dict[str, Any]:
+        """Persiste todas as sessões prontas que compõem um lote."""
+
+        batch = self.batches.get(batch_id)
+        if batch is None:
+            raise KeyError(batch_id)
+        for pair in batch.pairs:
+            session_id = pair.get("session_id")
+            state = self.sessions.get(session_id) if session_id else None
+            if state is not None and state.status == "ready":
+                self.save(session_id, reviewer)
+        return self.batch_result(batch_id)
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for state in self.sessions.values():
+            path = self.repository.session_dir(state.session_id) / "session.json"
+            updated_at = datetime.fromtimestamp(
+                path.stat().st_mtime, timezone.utc
+            ).isoformat() if path.exists() else ""
+            entries.append(
+                {
+                    "session_id": state.session_id,
+                    "status": state.status,
+                    "revision": state.revision,
+                    "updated_at": updated_at,
+                    "source_name": state.descriptors[0].name if state.descriptors else "Amostra sem nome",
+                    "nucleus_count": state.aggregate.get("nucleus_count"),
+                }
+            )
+        return sorted(entries, key=lambda item: item["updated_at"], reverse=True)
+
+    def _restore_sessions(self) -> None:
+        """Restaura análises concluídas após reinicializar a aplicação local."""
+
+        for directory, payload in self.repository.states():
+            try:
+                result = payload["result"]
+                session_id = str(result["session_id"])
+                input_files = dict(payload["input_files"])
+                nucleus_data = (directory / input_files["nucleus"]).read_bytes()
+                protein_data = (directory / input_files["protein"]).read_bytes()
+                nucleus_image, _ = decode_image(nucleus_data, input_files["nucleus"])
+                protein_image, _ = decode_image(protein_data, input_files["protein"])
+                labels = mask = None
+                arrays_path = directory / "analysis.npz"
+                if arrays_path.exists():
+                    with np.load(arrays_path, allow_pickle=False) as arrays:
+                        labels = arrays["labels"]
+                        mask = arrays["mask"]
+                state = SessionState(
+                    session_id=session_id,
+                    job_id=str(result["job_id"]),
+                    config=SegmentationConfig(**result["config"]),
+                    warnings=list(result.get("warnings", [])),
+                    descriptors=[
+                        ImageDescriptor(**item)
+                        for item in payload.get("descriptors", [])
+                    ],
+                    nucleus_image=nucleus_image,
+                    protein_image=protein_image,
+                    labels=labels,
+                    mask=mask,
+                    nuclei=list(result.get("nuclei", [])),
+                    aggregate=dict(result.get("aggregate", {})),
+                    revision=int(result.get("revision", 0)),
+                    status=str(result.get("status", "error")),
+                    input_files=input_files,
+                    history=list(payload.get("history", [])),
+                    redo_stack=list(payload.get("redo_stack", [])),
+                )
+                job_data = dict(payload.get("job", {}))
+                job = Job(
+                    job_id=state.job_id,
+                    session_id=session_id,
+                    status=str(job_data.get("status", "completed")),
+                    progress=int(job_data.get("progress", 100)),
+                    message=str(job_data.get("message", "Sessão restaurada")),
+                    error=job_data.get("error"),
+                )
+                if state.status == "ready":
+                    job.status, job.progress = "completed", 100
+                elif job.status in {"queued", "running"}:
+                    state.status = job.status = "error"
+                    job.progress = 100
+                    job.message = "Processamento interrompido pela reinicialização"
+                self.sessions[session_id] = state
+                self.jobs[job.job_id] = job
+                self.events[session_id] = []
+            except (KeyError, OSError, ValueError, json.JSONDecodeError):
+                continue
 
 
 class RevisionConflict(Exception):
@@ -807,7 +1102,11 @@ def job_payload(job: Job) -> dict[str, Any]:
 
 def _batch_key(name: str) -> str:
     normalized = name.replace("\\", "/").strip("/")
-    stem = re.sub(r"\.[^.\/]+$", "", normalized)
+    # O navegador envia diretórios selecionados como `pasta/arquivo.tif`.
+    # Núcleos e proteínas normalmente vêm de pastas diferentes, portanto o
+    # diretório não pode participar da chave de pareamento.
+    basename = normalized.rsplit("/", 1)[-1]
+    stem = re.sub(r"\.[^.\/]+$", "", basename)
     stem = re.sub(r"(?:_z0)?_ch(?:00|02)$", "", stem, flags=re.IGNORECASE)
     return stem.casefold()
 

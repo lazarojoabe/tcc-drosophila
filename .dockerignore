@@ -1,0 +1,16 @@
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.nuclei_data/
+data/
+results/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+docs/
+tests/
+backend/tests/

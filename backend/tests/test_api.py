@@ -12,10 +12,24 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from backend.app import main
+from backend.app.security import AccessControl
 from backend.app.services.session_manager import SessionManager
 
 
 class ApiTests(unittest.TestCase):
+    def test_access_code_protects_api_when_enabled(self) -> None:
+        with patch.object(main, "access_control", AccessControl("grupo-piloto", "segredo")):
+            with TestClient(main.app) as client:
+                protected = client.get("/api/sessions")
+                self.assertEqual(protected.status_code, 401)
+                login = client.post("/api/auth/login", json={"access_code": "grupo-piloto"})
+                self.assertEqual(login.status_code, 200, login.text)
+                token = login.json()["access_token"]
+                allowed = client.get(
+                    "/api/sessions", headers={"Authorization": f"Bearer {token}"}
+                )
+                self.assertEqual(allowed.status_code, 200)
+
     def test_upload_edit_and_path_sanitization(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             manager = SessionManager(Path(temporary))
@@ -48,13 +62,17 @@ class ApiTests(unittest.TestCase):
                     )
                     self.assertEqual(response.status_code, 202, response.text)
                     session = response.json()
-                    for _ in range(20):
+                    result = None
+                    for _ in range(100):
                         result = client.get(
                             f"/api/sessions/{session['session_id']}/result"
                         ).json()
-                        if result["status"] == "ready":
+                        if result["status"] == "ready" and result["nuclei"]:
                             break
-                        time.sleep(0.02)
+                        time.sleep(0.05)
+                    self.assertIsNotNone(result)
+                    self.assertEqual(result["status"], "ready")
+                    self.assertTrue(result["nuclei"], result)
                     self.assertEqual(result["nuclei"][0]["state"], "active")
                     edited = client.post(
                         f"/api/sessions/{session['session_id']}/edits",
@@ -66,6 +84,12 @@ class ApiTests(unittest.TestCase):
                     )
                     self.assertEqual(edited.status_code, 200, edited.text)
                     self.assertEqual(edited.json()["aggregate"]["nucleus_count"], 0)
+                    sessions = client.get("/api/sessions")
+                    self.assertEqual(sessions.status_code, 200, sessions.text)
+                    self.assertEqual(sessions.json()[0]["session_id"], session["session_id"])
+                    audit = client.get(f"/api/sessions/{session['session_id']}/history")
+                    self.assertEqual(audit.status_code, 200, audit.text)
+                    self.assertEqual(audit.json()[-1]["operation"], "exclude")
                     conflict = client.post(
                         f"/api/sessions/{session['session_id']}/edits",
                         json={

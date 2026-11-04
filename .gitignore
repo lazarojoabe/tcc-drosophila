@@ -7,6 +7,12 @@ results/*
 .pytest_cache/
 .coverage
 .nuclei_data/
+data/lote_validacao_10/
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 frontend/node_modules/
 frontend/dist/
 frontend/vite.config.js

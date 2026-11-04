@@ -5,6 +5,7 @@ import type { Result } from "../types";
 interface Props {
   result: Result;
   histogramUrl: (kind: HistogramKind) => string;
+  context?: string;
 }
 
 const options: Record<HistogramKind, { title: string; description: string }> = {
@@ -26,7 +27,7 @@ function value(number: number | null | undefined) {
   return number === null || number === undefined ? "—" : number.toFixed(3);
 }
 
-export function SessionHistogram({ result, histogramUrl }: Props) {
+export function SessionHistogram({ result, histogramUrl, context = "amostra individual" }: Props) {
   const [kind, setKind] = useState<HistogramKind>("protein");
   const option = options[kind];
   const statistics =
@@ -55,7 +56,7 @@ export function SessionHistogram({ result, histogramUrl }: Props) {
     <section className="session-summary">
       <div className="session-summary-heading">
         <div>
-          <span className="section-label">HISTOGRAMA DA AMOSTRA</span>
+          <span className="section-label">HISTOGRAMA INDIVIDUAL · {context.toUpperCase()}</span>
           <strong>{option.title}</strong>
           <p>
             {option.description} Média, mediana e intervalo interquartil aparecem no gráfico.
@@ -93,7 +94,7 @@ export function SessionHistogram({ result, histogramUrl }: Props) {
       </div>
       <div className="session-summary-body">
         <img
-          src={`${histogramUrl(kind)}?revision=${result.revision}`}
+          src={`${histogramUrl(kind)}${histogramUrl(kind).includes("?") ? "&" : "?"}revision=${result.revision}`}
           alt={option.title}
         />
         <div className="batch-summary-metrics">

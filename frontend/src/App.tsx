@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -8,28 +8,36 @@ import {
   FileImage,
   FolderOpen,
   FolderTree,
+  History,
   Layers3,
   LoaderCircle,
   Microscope,
   Play,
   RefreshCw,
   Redo2,
+  Save,
   Search,
   Settings2,
   SlidersHorizontal,
   Undo2,
+  X,
 } from "lucide-react";
 import {
   batchCsvUrl,
+  batchPackageUrl,
   batchHistogramUrl,
   createBatch,
   createSession,
   edit,
   exportUrl,
   getBatch,
+  getHistory,
   getResult,
+  listSessions,
   redo,
   reprocess,
+  saveSession,
+  saveBatch,
   sessionHistogramUrl,
   subscribeJob,
   undo,
@@ -39,7 +47,8 @@ import { BatchSummary } from "./components/BatchSummary";
 import { SessionHistogram } from "./components/SessionHistogram";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { NucleiTable } from "./components/NucleiTable";
-import type { Batch, BatchPair, Config, Job, Result } from "./types";
+import { AuditTrail } from "./components/AuditTrail";
+import type { AuditEntry, Batch, BatchPair, Config, Job, Result, SavedSession } from "./types";
 
 const defaults: Config = {
   nucleus_channel: 0,
@@ -55,13 +64,39 @@ const defaults: Config = {
   input_mode: "auto",
 };
 type InputMode = "single" | "folders";
+type DialogState = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm?: () => void;
+};
 const imageExtensions = /\.(tif|tiff|png|jpe?g)$/i;
 function imageFiles(files: FileList | null): File[] {
   return Array.from(files ?? []).filter((file) =>
     imageExtensions.test(file.name),
   );
 }
-function folderLabel(files: File[]): string {
+type DirectoryEntry = {
+  kind: "file" | "directory";
+  name: string;
+  getFile?: () => Promise<File>;
+  values?: () => AsyncIterable<DirectoryEntry>;
+};
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: () => Promise<DirectoryEntry>;
+};
+async function readDirectory(handle: DirectoryEntry, files: File[]): Promise<void> {
+  if (!handle.values) return;
+  for await (const entry of handle.values()) {
+    if (entry.kind === "file" && entry.getFile) {
+      files.push(await entry.getFile());
+    } else if (entry.kind === "directory") {
+      await readDirectory(entry, files);
+    }
+  }
+}
+function folderLabel(files: File[], explicitName?: string): string {
+  if (explicitName) return explicitName;
   if (!files.length) return "Nenhuma pasta selecionada";
   const relative = files[0].webkitRelativePath || files[0].name;
   return relative.split(/[\\/]/)[0] || `${files.length} imagens`;
@@ -73,6 +108,10 @@ export default function App() {
   const [proteinFile, setProteinFile] = useState<File>();
   const [nucleusFolder, setNucleusFolder] = useState<File[]>([]);
   const [proteinFolder, setProteinFolder] = useState<File[]>([]);
+  const [nucleusFolderName, setNucleusFolderName] = useState("");
+  const [proteinFolderName, setProteinFolderName] = useState("");
+  const nucleusFolderInput = useRef<HTMLInputElement>(null);
+  const proteinFolderInput = useRef<HTMLInputElement>(null);
   const [config, setConfig] = useState<Config>(defaults);
   const [result, setResult] = useState<Result>();
   const [job, setJob] = useState<Job>();
@@ -89,6 +128,12 @@ export default function App() {
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
   const [showHistogram, setShowHistogram] = useState(false);
+  const [reviewer, setReviewer] = useState("");
+  const [showHistory, setShowHistory] = useState(true);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [saveMessage, setSaveMessage] = useState("");
   const selectedNucleus = result?.nuclei.find(
     (nucleus) => nucleus.nucleus_id === selected[0],
   );
@@ -121,6 +166,21 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [batch?.batch_id, batch?.status, result]);
   useEffect(() => {
+    void refreshSavedSessions();
+  }, []);
+  useEffect(() => {
+    if (result?.session_id) void refreshSavedSessions();
+  }, [result?.session_id, result?.revision]);
+  useEffect(() => {
+    if (!result?.session_id) {
+      setAuditEntries([]);
+      return;
+    }
+    void getHistory(result.session_id)
+      .then(setAuditEntries)
+      .catch(() => undefined);
+  }, [result?.session_id, result?.revision]);
+  useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === "z") {
@@ -138,7 +198,10 @@ export default function App() {
 
   async function openSingle() {
     if (!nucleusFile || !proteinFile) {
-      setError("Selecione os dois arquivos da amostra.");
+      setDialog({
+        title: "Arquivos incompletos",
+        message: "Selecione o canal nuclear e o canal proteico antes de processar a amostra.",
+      });
       return;
     }
     try {
@@ -168,7 +231,10 @@ export default function App() {
   }
   async function openFolders() {
     if (!nucleusFolder.length || !proteinFolder.length) {
-      setError("Selecione uma pasta de núcleos e uma pasta de proteínas.");
+      setDialog({
+        title: "Pastas incompletas",
+        message: "Selecione uma pasta de núcleos e outra de proteínas antes de iniciar o lote.",
+      });
       return;
     }
     try {
@@ -194,10 +260,32 @@ export default function App() {
       setSelected([]);
       setEditId(null);
       setShowHistogram(false);
+      setShowHistory(true);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Não foi possível abrir o par",
       );
+    }
+  }
+  async function refreshSavedSessions() {
+    try {
+      setSavedSessions(await listSessions());
+    } catch {
+      // A lista é complementar; a análise atual continua disponível offline.
+    }
+  }
+  async function loadSavedSession(session: SavedSession) {
+    try {
+      setError("");
+      setBatch(undefined);
+      setJob(undefined);
+      setResult(await getResult(session.session_id));
+      setSelected([]);
+      setEditId(null);
+      setShowHistogram(false);
+      setShowHistory(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível reabrir a sessão");
     }
   }
   async function refresh(id = result?.session_id) {
@@ -218,6 +306,7 @@ export default function App() {
           operation,
           nucleus_ids: selected,
           base_revision: result.revision,
+          reviewer,
         }),
       );
     } catch (cause) {
@@ -230,25 +319,125 @@ export default function App() {
   async function historyAction(action: typeof undo) {
     if (!result) return;
     try {
-      setResult(await action(result.session_id, result.revision));
+      setResult(await action(result.session_id, result.revision, reviewer));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Falha no histórico");
     }
   }
   async function startReprocess() {
-    if (
-      !result ||
-      !confirm(
-        "Reprocessar descarta os identificadores e as edições atuais. Continuar?",
-      )
-    )
-      return;
+    if (!result) return;
+    setDialog({
+      title: "Reprocessar análise?",
+      message: "O reprocessamento recalcula a segmentação e substitui os identificadores e edições atuais desta sessão.",
+      confirmLabel: "Reprocessar",
+      onConfirm: () => void confirmReprocess(),
+    });
+  }
+  async function confirmReprocess() {
+    if (!result) return;
+    setDialog(null);
     try {
-      const next = await reprocess(result.session_id, result.revision, config);
+      const next = await reprocess(
+        result.session_id,
+        result.revision,
+        config,
+        reviewer,
+      );
       setJob(next);
       subscribeJob(result.session_id, setJob, () => void refresh());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Falha ao reprocessar");
+    }
+  }
+  async function saveCurrentSession() {
+    if (!result && !batch) return;
+    try {
+      setSaveMessage("");
+      if (batch) {
+        const savedBatch = await saveBatch(batch.batch_id, reviewer);
+        setBatch(savedBatch);
+        const link = document.createElement("a");
+        link.href = batchPackageUrl(savedBatch.batch_id);
+        link.download = `nuclei-batch-${savedBatch.batch_id}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setSaveMessage("Lote completo baixado");
+        window.setTimeout(() => setSaveMessage(""), 2600);
+        await refreshSavedSessions();
+        return;
+      }
+      if (!result) return;
+      const saved = await saveSession(result.session_id, reviewer);
+      setResult(saved);
+      const link = document.createElement("a");
+      link.href = exportUrl(saved.session_id, "zip");
+      link.download = `nuclei-analysis-${saved.session_id}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setSaveMessage("Pacote baixado");
+      window.setTimeout(() => setSaveMessage(""), 2600);
+      await refreshSavedSessions();
+    } catch (cause) {
+      setDialog({
+        title: "Não foi possível salvar",
+        message: cause instanceof Error ? cause.message : "Falha ao gravar a análise no sistema de arquivos.",
+      });
+    }
+  }
+
+  function selectFolder(files: FileList | null, role: "nucleus" | "protein") {
+    const allFiles = Array.from(files ?? []);
+    const validFiles = imageFiles(files);
+    if (allFiles.length && !validFiles.length) {
+      setDialog({
+        title: "Formato não reconhecido",
+        message: "A pasta selecionada não contém TIFF, PNG ou JPEG compatível.",
+      });
+    }
+    if (role === "nucleus") {
+      setNucleusFolder(validFiles);
+      setNucleusFolderName("");
+    } else {
+      setProteinFolder(validFiles);
+      setProteinFolderName("");
+    }
+  }
+  async function pickFolder(role: "nucleus" | "protein") {
+    const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
+    if (!picker) {
+      setDialog({
+        title: "Seletor de pastas indisponível",
+        message: "Para selecionar uma pasta sem enviar arquivos individualmente, abra a plataforma no Google Chrome ou Microsoft Edge atualizado.",
+      });
+      return;
+    }
+    try {
+      const directory = await picker();
+      const files: File[] = [];
+      await readDirectory(directory, files);
+      const validFiles = files.filter((file) => imageExtensions.test(file.name));
+      if (!validFiles.length) {
+        setDialog({
+          title: "Pasta sem imagens compatíveis",
+          message: "A pasta selecionada não contém TIFF, PNG ou JPEG compatível.",
+        });
+        return;
+      }
+      if (role === "nucleus") {
+        setNucleusFolder(validFiles);
+        setNucleusFolderName(directory.name);
+      } else {
+        setProteinFolder(validFiles);
+        setProteinFolderName(directory.name);
+      }
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setDialog({
+        title: "Não foi possível ler a pasta",
+        message: "O navegador não permitiu acessar os arquivos selecionados. Tente novamente.",
+      });
     }
   }
   async function saveContour() {
@@ -265,6 +454,7 @@ export default function App() {
           nucleus_ids: [editId],
           polygon: editPolygon,
           base_revision: result.revision,
+          reviewer,
         }),
       );
       setEditId(null);
@@ -272,6 +462,19 @@ export default function App() {
       setEditMode("adjust");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Contorno inválido");
+    }
+  }
+  async function toggleHistory() {
+    if (!result) return;
+    if (showHistory) {
+      setShowHistory(false);
+      return;
+    }
+    try {
+      setAuditEntries(await getHistory(result.session_id));
+      setShowHistory(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Falha ao abrir o histórico");
     }
   }
 
@@ -351,9 +554,16 @@ export default function App() {
                   <input
                     type="file"
                     accept=".tif,.tiff,.png,.jpg,.jpeg"
-                    onChange={(event) =>
-                      setNucleusFile(event.target.files?.[0])
-                    }
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      if (!imageExtensions.test(file.name)) {
+                        setDialog({ title: "Formato não reconhecido", message: "Selecione uma imagem TIFF, PNG ou JPEG para o canal nuclear." });
+                        event.currentTarget.value = "";
+                        return;
+                      }
+                      setNucleusFile(file);
+                    }}
                   />
                   <span className="file-input-view">
                     {nucleusFile ? (
@@ -372,9 +582,16 @@ export default function App() {
                   <input
                     type="file"
                     accept=".tif,.tiff,.png,.jpg,.jpeg"
-                    onChange={(event) =>
-                      setProteinFile(event.target.files?.[0])
-                    }
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      if (!imageExtensions.test(file.name)) {
+                        setDialog({ title: "Formato não reconhecido", message: "Selecione uma imagem TIFF, PNG ou JPEG para o canal proteico." });
+                        event.currentTarget.value = "";
+                        return;
+                      }
+                      setProteinFile(file);
+                    }}
                   />
                   <span className="file-input-view">
                     {proteinFile ? (
@@ -398,46 +615,40 @@ export default function App() {
               </div>
             ) : (
               <div className="folder-stack">
-                <label className="folder-drop">
-                  <input
-                    type="file"
-                    multiple
-                    {...({ webkitdirectory: "", directory: "" } as Record<
-                      string,
-                      string
-                    >)}
-                    onChange={(event) =>
-                      setNucleusFolder(imageFiles(event.target.files))
-                    }
-                  />
+                <input
+                  ref={nucleusFolderInput}
+                  className="hidden-folder-input"
+                  type="file"
+                  multiple
+                  {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                  onChange={(event) => selectFolder(event.target.files, "nucleus")}
+                />
+                <button type="button" className="folder-drop" onClick={() => void pickFolder("nucleus")}>
                   <FolderOpen size={20} />
-                  <strong>{folderLabel(nucleusFolder)}</strong>
+                  <strong>{folderLabel(nucleusFolder, nucleusFolderName)}</strong>
                   <span>
                     {nucleusFolder.length
                       ? `${nucleusFolder.length} imagens · núcleos`
                       : "Selecionar pasta de núcleos"}
                   </span>
-                </label>
-                <label className="folder-drop">
-                  <input
-                    type="file"
-                    multiple
-                    {...({ webkitdirectory: "", directory: "" } as Record<
-                      string,
-                      string
-                    >)}
-                    onChange={(event) =>
-                      setProteinFolder(imageFiles(event.target.files))
-                    }
-                  />
+                </button>
+                <input
+                  ref={proteinFolderInput}
+                  className="hidden-folder-input"
+                  type="file"
+                  multiple
+                  {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                  onChange={(event) => selectFolder(event.target.files, "protein")}
+                />
+                <button type="button" className="folder-drop" onClick={() => void pickFolder("protein")}>
                   <FolderOpen size={20} />
-                  <strong>{folderLabel(proteinFolder)}</strong>
+                  <strong>{folderLabel(proteinFolder, proteinFolderName)}</strong>
                   <span>
                     {proteinFolder.length
                       ? `${proteinFolder.length} imagens · proteínas`
                       : "Selecionar pasta de proteínas"}
                   </span>
-                </label>
+                </button>
                 <button
                   className="primary action-button"
                   onClick={() => void openFolders()}
@@ -447,7 +658,8 @@ export default function App() {
                 </button>
                 <p className="helper-text">
                   <Database size={13} /> Os pares são reconhecidos pelo nome
-                  normalizado, não pela ordem dos arquivos.
+                  normalizado, não pela ordem dos arquivos. A seleção de pastas
+                  usa o seletor seguro do Chrome/Edge.
                 </p>
               </div>
             )}
@@ -528,6 +740,25 @@ export default function App() {
           <section className="control-section">
             <div className="section-title">
               <span>
+                <History size={15} /> Rastreabilidade
+              </span>
+            </div>
+            <label>
+              Responsável pela revisão
+              <input
+                value={reviewer}
+                maxLength={120}
+                placeholder="Nome do pesquisador (opcional)"
+                onChange={(event) => setReviewer(event.target.value)}
+              />
+            </label>
+            <p className="helper-text">
+              O nome é registrado junto às edições e ações de revisão.
+            </p>
+          </section>
+          <section className="control-section">
+            <div className="section-title">
+              <span>
                 <Settings2 size={15} /> Segmentação
               </span>
             </div>
@@ -560,6 +791,33 @@ export default function App() {
               />
             </label>
           </section>
+          {savedSessions.length ? (
+            <section className="batch-section saved-sessions">
+              <div className="section-title">
+                <span>
+                  <History size={15} /> Sessões salvas
+                </span>
+                <button onClick={() => void refreshSavedSessions()} title="Atualizar sessões">
+                  <RefreshCw size={13} />
+                </button>
+              </div>
+              <div className="batch-list">
+                {savedSessions.map((session) => (
+                  <button
+                    key={session.session_id}
+                    className={`batch-item ${session.session_id === result?.session_id ? "selected" : ""}`}
+                    onClick={() => void loadSavedSession(session)}
+                  >
+                    <span className={`pair-status ${session.status === "ready" ? "ready" : "error"}`} />
+                    <span className="pair-name">
+                      {session.source_name} · rev. {session.revision}
+                    </span>
+                    <ChevronRight size={13} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {batch && (
             <section className="batch-section">
               <div className="section-title">
@@ -636,7 +894,13 @@ export default function App() {
                 onClick={() => setShowHistogram((current) => !current)}
                 disabled={!result}
               >
-                {showHistogram ? "Ocultar hist." : "Histograma"}
+                {showHistogram ? "Ocultar hist." : batch ? "Hist. desta imagem" : "Histograma"}
+              </button>
+              <button onClick={() => void saveCurrentSession()} disabled={(!result && !batch) || busy}>
+                <Save size={14} /> {saveMessage || (batch ? "Salvar lote e baixar" : "Salvar e baixar")}
+              </button>
+              <button onClick={() => void toggleHistory()} disabled={!result}>
+                <History size={14} /> {showHistory ? "Ocultar histórico" : `Histórico${auditEntries.length ? ` · ${auditEntries.length}` : ""}`}
               </button>
               <button
                 onClick={() => void startReprocess()}
@@ -662,20 +926,29 @@ export default function App() {
               <b>{batch?.progress ?? job?.progress ?? 0}%</b>
             </div>
           ) : null}
+          {result && (showHistogram || showHistory) ? (
+            <div
+              className={`analysis-context-row ${showHistogram && showHistory ? "split" : "single"}`}
+            >
+              {showHistogram ? (
+                <SessionHistogram
+                  result={result}
+                  histogramUrl={(kind) => sessionHistogramUrl(result.session_id, kind)}
+                  context={batch ? "imagem do lote" : "amostra individual"}
+                />
+              ) : null}
+              {showHistory ? <AuditTrail entries={auditEntries} /> : null}
+            </div>
+          ) : null}
           {batch ? (
             <BatchSummary
               batch={batch}
               histogramUrl={(kind) => batchHistogramUrl(batch.batch_id, kind)}
               csvUrl={batchCsvUrl(batch.batch_id)}
+              packageUrl={batchPackageUrl(batch.batch_id)}
             />
           ) : null}
-          {result && !batch && showHistogram ? (
-            <SessionHistogram
-              result={result}
-              histogramUrl={(kind) => sessionHistogramUrl(result.session_id, kind)}
-            />
-          ) : null}
-          <div className="analysis-grid">
+          {result ? <div className="analysis-grid">
             <section className="image-panel">
               <div className="image-panel-header">
                 <div>
@@ -807,12 +1080,62 @@ export default function App() {
                 />
               </section>
             </div>
-          </div>
+          </div> : batch ? (
+            <section className="batch-state-panel">
+              <div className="batch-state-icon">
+                {batch.status === "error" ? <AlertTriangle size={27} /> : <Layers3 size={27} />}
+              </div>
+              <span className="section-label">RESULTADOS DO LOTE</span>
+              <h2>
+                {batch.status === "error"
+                  ? "Nenhum resultado foi gerado"
+                  : batchReady
+                    ? "Resultados individuais disponíveis"
+                    : "Preparando os resultados individuais"}
+              </h2>
+              <p>
+                {batch.status === "error"
+                  ? "Confira os itens abaixo e verifique se os nomes dos arquivos de núcleos e proteínas correspondem."
+                  : `O lote contém ${batch.total} pares. ${batchReady ? "Selecione um item para abrir a imagem e revisar os núcleos." : "A primeira imagem aparecerá automaticamente assim que terminar."}`}
+              </p>
+              <div className="batch-state-progress">
+                <span style={{ width: `${batch.progress}%` }} />
+              </div>
+              <div className="batch-state-counts">
+                <strong>{batchReady} de {batch.total} pares prontos</strong>
+                <span>{batch.failed} sem resultado</span>
+              </div>
+              <div className="batch-state-list">
+                {batch.pairs.map((pair) => (
+                  <button
+                    key={pair.key}
+                    className="batch-state-item"
+                    disabled={!pair.session_id || pair.status === "error"}
+                    onClick={() => void loadPair(pair)}
+                  >
+                    <span className={`pair-status ${pair.status}`} />
+                    <span>{pair.key.split(/[\\/]/).pop()}</span>
+                    <small>
+                      {pair.status === "ready" ? "Abrir revisão" : pair.error ?? "Aguardando processamento"}
+                    </small>
+                    {pair.session_id ? <ChevronRight size={15} /> : null}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <section className="batch-state-panel empty">
+              <div className="batch-state-icon"><Microscope size={27} /></div>
+              <span className="section-label">ESTAÇÃO DE ANÁLISE</span>
+              <h2>Nenhuma imagem carregada</h2>
+              <p>Selecione uma amostra ou duas pastas pareadas para iniciar o processamento.</p>
+            </section>
+          )}
         </main>
       </div>
       <footer className="lab-footer">
         <span>
-          <span className="connection-dot" /> API local conectada
+          <span className="connection-dot" /> API conectada
         </span>
       </footer>
       {result?.warnings.map((warning) => (
@@ -824,6 +1147,26 @@ export default function App() {
         <button className="toast error" onClick={() => setError("")}>
           <AlertTriangle size={15} /> {error}
         </button>
+      )}
+      {dialog && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+            <button className="modal-close" onClick={() => setDialog(null)} aria-label="Fechar">
+              <X size={17} />
+            </button>
+            <span className="modal-icon"><AlertTriangle size={21} /></span>
+            <h2 id="app-modal-title">{dialog.title}</h2>
+            <p>{dialog.message}</p>
+            <div className="modal-actions">
+              <button onClick={() => setDialog(null)}>Fechar</button>
+              {dialog.onConfirm ? (
+                <button className="primary" onClick={dialog.onConfirm}>
+                  {dialog.confirmLabel ?? "Continuar"}
+                </button>
+              ) : null}
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

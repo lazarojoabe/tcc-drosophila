@@ -4,6 +4,7 @@ import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -107,4 +108,58 @@ def mask_png(labels: np.ndarray) -> bytes:
     ok, encoded = cv2.imencode(".png", mask)
     if not ok:
         raise IOError("Falha ao codificar a máscara")
+    return encoded.tobytes()
+
+
+def review_mask_png(shape: tuple[int, int], nuclei: list[dict[str, Any]]) -> bytes:
+    """Mosaico binário reconstruído a partir dos contornos atualmente revisados."""
+
+    mask = np.zeros(shape, dtype=np.uint8)
+    for nucleus in nuclei:
+        if nucleus.get("state") == "excluded":
+            continue
+        polygon = np.asarray(nucleus.get("polygon", []), dtype=np.int32)
+        if polygon.ndim == 2 and polygon.shape[0] >= 3 and polygon.shape[1] == 2:
+            cv2.fillPoly(mask, [polygon.reshape((-1, 1, 2))], 255)
+    ok, encoded = cv2.imencode(".png", mask)
+    if not ok:
+        raise IOError("Falha ao codificar a máscara revisada")
+    return encoded.tobytes()
+
+
+def review_overlay_png(
+    image: np.ndarray, channel: int, nuclei: list[dict[str, Any]]
+) -> bytes:
+    """Gera uma prévia para auditoria com contornos, IDs e estado dos núcleos."""
+
+    preview = preview_png(image, channel)
+    decoded = cv2.imdecode(np.frombuffer(preview, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise IOError("Falha ao preparar a imagem de revisão")
+    for nucleus in nuclei:
+        polygon = np.asarray(nucleus.get("polygon", []), dtype=np.int32)
+        if polygon.ndim != 2 or polygon.shape[0] < 3 or polygon.shape[1] != 2:
+            continue
+        state = nucleus.get("state", "active")
+        color = {
+            "active": (65, 211, 169),
+            "hidden": (160, 174, 192),
+            "excluded": (83, 105, 235),
+        }.get(state, (0, 200, 255))
+        points = polygon.reshape((-1, 1, 2))
+        cv2.polylines(decoded, [points], True, color, 2, cv2.LINE_AA)
+        center = np.mean(polygon, axis=0).astype(int)
+        cv2.putText(
+            decoded,
+            str(nucleus.get("nucleus_id", "?")),
+            (int(center[0]) + 3, int(center[1]) - 3),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+    ok, encoded = cv2.imencode(".png", decoded)
+    if not ok:
+        raise IOError("Falha ao codificar a imagem de revisão")
     return encoded.tobytes()

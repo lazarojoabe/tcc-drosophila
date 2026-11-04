@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { imageUrl } from "../api";
 import type { Nucleus } from "../types";
 import {
   imageToScreen,
@@ -155,7 +156,7 @@ export function ImageViewer({
       imageRef.current = image;
       drawRef.current();
     };
-    image.src = `${import.meta.env.VITE_API_URL ?? "http://localhost:8000/api"}/sessions/${sessionId}/images/${layer}.png`;
+    image.src = imageUrl(sessionId, layer);
     return () => {
       image.onload = null;
       imageRef.current = null;

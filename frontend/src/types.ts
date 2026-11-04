@@ -59,6 +59,14 @@ export interface Session {
   warnings: string[];
   images: ImageDescriptor[];
 }
+export interface SavedSession {
+  session_id: string;
+  status: string;
+  revision: number;
+  updated_at: string;
+  source_name: string;
+  nucleus_count: number | null;
+}
 export interface AggregateMetrics {
   nucleus_count: number;
   visible_count: number;
@@ -92,6 +100,13 @@ export interface Job {
   progress: number;
   message: string;
   error: string | null;
+}
+export interface AuditEntry {
+  timestamp: string;
+  revision: number;
+  operation: string;
+  reviewer: string;
+  details: Record<string, unknown>;
 }
 export interface BatchPairMetrics {
   nucleus_count: number | null;

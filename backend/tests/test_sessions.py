@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import io
+import zipfile
 from pathlib import Path
 
 import cv2
@@ -22,10 +24,10 @@ class SessionTests(unittest.TestCase):
             encode = lambda image: cv2.imencode(".png", image)[1].tobytes()
             batch = manager.create_batch(
                 [
-                    (encode(nucleus), "experiment_A_z0_ch00.png"),
-                    (encode(nucleus), "only_nucleus_z0_ch00.png"),
+                    (encode(nucleus), "nucleos/experiment_A_z0_ch00.png"),
+                    (encode(nucleus), "nucleos/only_nucleus_z0_ch00.png"),
                 ],
-                [(encode(protein), "experiment_A_z0_ch02.png")],
+                [(encode(protein), "proteinas/experiment_A_z0_ch02.png")],
                 SegmentationConfig(min_nucleus_area=20, protein_channel=0),
             )
             self.assertEqual(len(batch.pairs), 2)
@@ -43,6 +45,20 @@ class SessionTests(unittest.TestCase):
                     manager.batch_histogram(batch.batch_id, kind).startswith(b"\x89PNG")
                 )
             self.assertIn(b"std_protein", manager.export_batch_csv(batch.batch_id))
+            saved_batch = manager.save_batch(batch.batch_id, "Pesquisadora lote")
+            self.assertEqual(saved_batch["completed"], 1)
+            ready_session = next(
+                pair["session_id"] for pair in batch.pairs if pair["status"] == "ready"
+            )
+            self.assertEqual(
+                manager.audit_history(ready_session)[-1]["operation"], "manual_save"
+            )
+            with zipfile.ZipFile(io.BytesIO(manager.export_batch_package(batch.batch_id))) as archive:
+                names = set(archive.namelist())
+            self.assertIn("batch.json", names)
+            self.assertIn("batch.csv", names)
+            self.assertIn("histograms/protein.png", names)
+            self.assertTrue(any(name.startswith("sessions/") for name in names))
 
     def test_event_cursor_can_start_at_end_and_receive_future_event(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -57,6 +73,66 @@ class SessionTests(unittest.TestCase):
             cursor, events = manager.events_after("session", cursor)
             self.assertEqual(cursor, 2)
             self.assertEqual(events[0]["data"]["status"], "completed")
+
+    def test_filesystem_audit_restores_completed_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manager = SessionManager(directory)
+            nucleus = np.zeros((64, 64), np.uint8)
+            cv2.circle(nucleus, (32, 32), 15, 255, -1)
+            protein = np.full((64, 64), 5, np.uint8)
+            protein[nucleus > 0] = 100
+            encode = lambda image: cv2.imencode(".png", image)[1].tobytes()
+            state = manager.create_session(
+                encode(nucleus),
+                "nucleus.png",
+                encode(protein),
+                "protein.png",
+                SegmentationConfig(min_nucleus_area=20, protein_channel=0),
+            )
+            manager.executor.shutdown(wait=True)
+            manager.apply_edit(
+                state.session_id,
+                EditRequest(
+                    operation="hide",
+                    nucleus_ids=[1],
+                    base_revision=0,
+                    reviewer="Pesquisadora teste",
+                ),
+            )
+            restored = SessionManager(directory)
+            result = restored.result(state.session_id)
+            self.assertEqual(result["revision"], 1)
+            self.assertEqual(result["nuclei"][0]["state"], "hidden")
+            history = restored.audit_history(state.session_id)
+            self.assertEqual(history[-1]["reviewer"], "Pesquisadora teste")
+            restored.save(state.session_id, "Pesquisadora teste")
+            self.assertEqual(restored.audit_history(state.session_id)[-1]["operation"], "manual_save")
+            self.assertTrue((directory / state.session_id / "analysis.npz").exists())
+            package = restored.export_package(state.session_id)
+            with zipfile.ZipFile(io.BytesIO(package)) as archive:
+                names = set(archive.namelist())
+            self.assertTrue(
+                {
+                    "README.txt",
+                    "analysis.json",
+                    "nuclei.csv",
+                    "audit.jsonl",
+                    "histograms/protein.png",
+                    "histograms/nucleus.png",
+                    "histograms/standard-deviation.png",
+                    "images/nucleus.png",
+                    "images/protein.png",
+                    "images/mask.png",
+                    "images/review-overlay.png",
+                    "images/protein-review-overlay.png",
+                    "images/review-mask.png",
+                    "original/nucleus-nucleus.png",
+                    "original/protein-protein.png",
+                }.issubset(names)
+            )
+            restored.executor.shutdown(wait=True)
+            restored.batch_executor.shutdown(wait=True)
 
     def test_exclude_restore_undo_and_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

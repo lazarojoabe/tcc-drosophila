@@ -120,7 +120,16 @@ def recompute_nucleus(
     )
 
 
-def validate_polygon(polygon: list[list[float]], width: int, height: int) -> None:
+def normalize_polygon(
+    polygon: list[list[float]], width: int, height: int
+) -> tuple[list[list[float]], bool]:
+    """Valida o traço manual e corrige cruzamentos em um contorno externo.
+
+    O redesenho livre pode cruzar a própria linha por poucos pixels. Em vez de
+    rejeitar a revisão, rasterizamos o traço e recuperamos seu maior contorno
+    externo, preservando uma região utilizável para quantificação.
+    """
+
     if len(polygon) < 3:
         raise ValueError("O contorno deve ter pelo menos três vértices")
     points = np.asarray(polygon, dtype=np.float32)
@@ -133,8 +142,6 @@ def validate_polygon(polygon: list[list[float]], width: int, height: int) -> Non
     ):
         raise ValueError("O contorno deve permanecer dentro dos limites da imagem")
     contour = np.rint(points).astype(np.int32).reshape((-1, 1, 2))
-    if abs(float(cv2.contourArea(contour))) < 1:
-        raise ValueError("O contorno tem área nula")
 
     # Interseções entre arestas não consecutivas.
     def orientation(a, b, c):
@@ -146,6 +153,7 @@ def validate_polygon(polygon: list[list[float]], width: int, height: int) -> Non
             c, d, a
         ) != orientation(c, d, b)
 
+    has_intersection = False
     for index in range(len(points)):
         a, b = points[index], points[(index + 1) % len(points)]
         for other in range(index + 1, len(points)):
@@ -153,4 +161,30 @@ def validate_polygon(polygon: list[list[float]], width: int, height: int) -> Non
                 continue
             c, d = points[other], points[(other + 1) % len(points)]
             if intersects(a, b, c, d):
-                raise ValueError("O contorno não pode se autointersectar")
+                has_intersection = True
+                break
+        if has_intersection:
+            break
+    if not has_intersection:
+        if abs(float(cv2.contourArea(contour))) < 1:
+            raise ValueError("O contorno tem área nula")
+        return polygon, False
+
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillPoly(mask, [contour], 1)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise ValueError("Não foi possível recuperar o contorno desenhado")
+    corrected = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(corrected) < 1:
+        raise ValueError("O contorno corrigido tem área nula")
+    return (
+        [[float(point[0][0]), float(point[0][1])] for point in corrected],
+        True,
+    )
+
+
+def validate_polygon(polygon: list[list[float]], width: int, height: int) -> None:
+    """Compatibilidade para validações externas sem alterar o polígono recebido."""
+
+    normalize_polygon(polygon, width, height)
