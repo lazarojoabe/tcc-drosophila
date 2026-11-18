@@ -94,6 +94,7 @@ def session_payload(session_id: str) -> dict:
         "config": model_dump(state.config),
         "warnings": state.warnings,
         "images": [model_dump(item) for item in state.descriptors],
+        "reviewer": state.reviewer,
     }
 
 
@@ -141,6 +142,7 @@ async def create_session(
         ),
     ] = None,
     config_json: Annotated[str, Form()] = "{}",
+    reviewer: Annotated[str | None, Form(max_length=120)] = None,
 ):
     try:
         config = SegmentationConfig(**json.loads(config_json))
@@ -160,6 +162,7 @@ async def create_session(
             protein_data,
             protein_name or "protein.tif",
             config,
+            reviewer,
         )
         return session_payload(state.session_id)
     except (ValueError, json.JSONDecodeError) as error:
@@ -175,12 +178,13 @@ async def create_batch(
         list[UploadFile], File(description="Arquivos da pasta de proteínas")
     ],
     config_json: Annotated[str, Form()] = "{}",
+    reviewer: Annotated[str | None, Form(max_length=120)] = None,
 ):
     try:
         config = SegmentationConfig(**json.loads(config_json))
         nuclei = [(await item.read(), item.filename or "") for item in nucleus_files]
         proteins = [(await item.read(), item.filename or "") for item in protein_files]
-        batch = manager.create_batch(nuclei, proteins, config)
+        batch = manager.create_batch(nuclei, proteins, config, reviewer)
         return manager.batch_result(batch.batch_id)
     except (ValueError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

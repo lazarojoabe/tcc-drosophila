@@ -64,6 +64,7 @@ export interface Session {
   config: Config;
   warnings: string[];
   images: ImageDescriptor[];
+  reviewer: string;
 }
 export interface SavedSession {
   session_id: string;
@@ -72,6 +73,7 @@ export interface SavedSession {
   updated_at: string;
   source_name: string;
   nucleus_count: number | null;
+  reviewer: string;
 }
 export interface AggregateMetrics {
   nucleus_count: number;
@@ -98,6 +100,7 @@ export interface Result {
   nuclei: Nucleus[];
   aggregate: AggregateMetrics;
   job_id: string;
+  reviewer: string;
 }
 export interface Job {
   job_id: string;

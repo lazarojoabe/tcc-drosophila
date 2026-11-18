@@ -56,17 +56,20 @@ export function createSession(
   nucleus: File,
   protein: File | null,
   config: Config,
+  reviewer: string,
 ): Promise<Session> {
   const form = new FormData();
   form.append("nucleus_file", nucleus);
   if (protein) form.append("protein_file", protein);
   form.append("config_json", JSON.stringify(config));
+  form.append("reviewer", reviewer);
   return request<Session>("/sessions", { method: "POST", body: form });
 }
 export function createBatch(
   nuclei: File[],
   proteins: File[],
   config: Config,
+  reviewer: string,
 ): Promise<Batch> {
   const form = new FormData();
   nuclei.forEach((file) =>
@@ -76,6 +79,7 @@ export function createBatch(
     form.append("protein_files", file, file.webkitRelativePath || file.name),
   );
   form.append("config_json", JSON.stringify(config));
+  form.append("reviewer", reviewer);
   return request<Batch>("/batches", { method: "POST", body: form });
 }
 export const getBatch = (id: string) => request<Batch>(`/batches/${id}`);

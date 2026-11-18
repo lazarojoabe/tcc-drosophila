@@ -101,6 +101,16 @@ function captureScroll(): ScrollSnapshot {
   };
 }
 const imageExtensions = /\.(tif|tiff|png|jpe?g)$/i;
+const reviewerStorageKey = "nuclei-review-reviewer";
+
+function storedReviewer(): string {
+  try {
+    return window.localStorage.getItem(reviewerStorageKey) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function imageFiles(files: FileList | null): File[] {
   return Array.from(files ?? []).filter((file) =>
     imageExtensions.test(file.name),
@@ -159,7 +169,9 @@ export default function App() {
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
   const [showHistogram, setShowHistogram] = useState(false);
-  const [reviewer, setReviewer] = useState("");
+  const [reviewer, setReviewer] = useState(storedReviewer);
+  const [reviewerDraft, setReviewerDraft] = useState(storedReviewer);
+  const [reviewerConfirmed, setReviewerConfirmed] = useState(false);
   const [showHistory, setShowHistory] = useState(true);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
@@ -176,6 +188,16 @@ export default function App() {
       ),
     [result, filter],
   );
+  const [sessionFilter, setSessionFilter] = useState("");
+  const filteredSavedSessions = useMemo(() => {
+    const query = sessionFilter.trim().toLocaleLowerCase("pt-BR");
+    if (!query) return savedSessions;
+    return savedSessions.filter((session) =>
+      `${session.source_name} ${session.reviewer}`
+        .toLocaleLowerCase("pt-BR")
+        .includes(query),
+    );
+  }, [savedSessions, sessionFilter]);
   const busy =
     job?.status === "queued" ||
     job?.status === "running" ||
@@ -197,6 +219,39 @@ export default function App() {
   function commitResult(next: Result) {
     pendingScroll.current = captureScroll();
     setResult(next);
+  }
+
+  function reviewerForAction(): string | null {
+    const normalized = reviewer.trim();
+    if (reviewerConfirmed && normalized) return normalized;
+    setReviewerDraft(normalized);
+    setReviewerConfirmed(false);
+    return null;
+  }
+
+  function confirmReviewer(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = reviewerDraft.trim();
+    if (!normalized) return;
+    setReviewer(normalized);
+    setReviewerDraft(normalized);
+    try {
+      window.localStorage.setItem(reviewerStorageKey, normalized);
+    } catch {
+      // O preenchimento continua ativo mesmo quando o navegador bloqueia o armazenamento local.
+    }
+    setReviewerConfirmed(true);
+  }
+
+  function updateReviewer(value: string) {
+    setReviewer(value);
+    setReviewerDraft(value);
+    if (!value.trim()) return;
+    try {
+      window.localStorage.setItem(reviewerStorageKey, value.trim());
+    } catch {
+      // O valor atual permanece válido para a sessão aberta.
+    }
   }
 
   function selectNucleus(
@@ -287,6 +342,8 @@ export default function App() {
   });
 
   async function openSingle() {
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     if (!nucleusFile || !proteinFile) {
       setDialog({
         title: "Arquivos incompletos",
@@ -299,7 +356,12 @@ export default function App() {
       setBatch(undefined);
       setResult(undefined);
       setShowHistogram(false);
-      const session = await createSession(nucleusFile, proteinFile, config);
+      const session = await createSession(
+        nucleusFile,
+        proteinFile,
+        config,
+        activeReviewer,
+      );
       setJob({
         job_id: session.job_id,
         session_id: session.session_id,
@@ -320,6 +382,8 @@ export default function App() {
     }
   }
   async function openFolders() {
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     if (!nucleusFolder.length || !proteinFolder.length) {
       setDialog({
         title: "Pastas incompletas",
@@ -330,7 +394,12 @@ export default function App() {
     try {
       setError("");
       setResult(undefined);
-      const next = await createBatch(nucleusFolder, proteinFolder, config);
+      const next = await createBatch(
+        nucleusFolder,
+        proteinFolder,
+        config,
+        activeReviewer,
+      );
       setBatch(next);
       setJob(undefined);
       const firstReady = next.pairs.find(
@@ -392,6 +461,8 @@ export default function App() {
   }
   async function apply(operation: "hide" | "exclude" | "restore") {
     if (!result || !selected.length) return;
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     const affectedIds = new Set(selected);
     try {
       commitResult(
@@ -399,7 +470,7 @@ export default function App() {
           operation,
           nucleus_ids: selected,
           base_revision: result.revision,
-          reviewer,
+          reviewer: activeReviewer,
         }),
       );
       if (operation === "exclude") {
@@ -417,14 +488,17 @@ export default function App() {
   }
   async function historyAction(action: typeof undo) {
     if (!result) return;
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     try {
-      commitResult(await action(result.session_id, result.revision, reviewer));
+      commitResult(await action(result.session_id, result.revision, activeReviewer));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Falha no histórico");
     }
   }
   async function startReprocess() {
     if (!result) return;
+    if (!reviewerForAction()) return;
     setDialog({
       title: "Reprocessar análise?",
       message: "O reprocessamento recalcula a segmentação e substitui os identificadores e edições atuais desta sessão.",
@@ -434,13 +508,15 @@ export default function App() {
   }
   async function confirmReprocess() {
     if (!result) return;
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     setDialog(null);
     try {
       const next = await reprocess(
         result.session_id,
         result.revision,
         config,
-        reviewer,
+        activeReviewer,
       );
       setJob(next);
       subscribeJob(result.session_id, setJob, () => void refresh());
@@ -450,10 +526,12 @@ export default function App() {
   }
   async function saveCurrentSession() {
     if (!result && !batch) return;
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     try {
       setSaveMessage("");
       if (batch) {
-        const savedBatch = await saveBatch(batch.batch_id, reviewer);
+        const savedBatch = await saveBatch(batch.batch_id, activeReviewer);
         setBatch(savedBatch);
         const link = document.createElement("a");
         link.href = batchPackageUrl(savedBatch.batch_id);
@@ -467,7 +545,7 @@ export default function App() {
         return;
       }
       if (!result) return;
-      const saved = await saveSession(result.session_id, reviewer);
+      const saved = await saveSession(result.session_id, activeReviewer);
       commitResult(saved);
       const link = document.createElement("a");
       link.href = exportUrl(saved.session_id, "zip");
@@ -541,6 +619,8 @@ export default function App() {
   }
   async function saveContour() {
     if (!result || !editId || !editPolygon) return;
+    const activeReviewer = reviewerForAction();
+    if (!activeReviewer) return;
     if (editPolygon.length < 3) {
       setError("Redesenhe o contorno com pelo menos três pontos antes de confirmar.");
       return;
@@ -553,7 +633,7 @@ export default function App() {
           nucleus_ids: [editId],
           polygon: editPolygon,
           base_revision: result.revision,
-          reviewer,
+          reviewer: activeReviewer,
         }),
       );
       setEditId(null);
@@ -847,12 +927,12 @@ export default function App() {
               <input
                 value={reviewer}
                 maxLength={120}
-                placeholder="Nome do pesquisador (opcional)"
-                onChange={(event) => setReviewer(event.target.value)}
+                placeholder="Nome do pesquisador"
+                onChange={(event) => updateReviewer(event.target.value)}
               />
             </label>
             <p className="helper-text">
-              O nome é registrado junto às edições e ações de revisão.
+              Identificação obrigatória, registrada na criação, nas edições e nos arquivos de auditoria.
             </p>
           </section>
           <section className="control-section">
@@ -882,12 +962,23 @@ export default function App() {
                 <span>
                   <History size={15} /> Sessões salvas
                 </span>
-                <button onClick={() => void refreshSavedSessions()} title="Atualizar sessões">
-                  <RefreshCw size={13} />
-                </button>
+                <div className="session-list-tools">
+                  <label className="session-search">
+                    <Search size={12} />
+                    <input
+                      value={sessionFilter}
+                      placeholder="Nome ou arquivo"
+                      onChange={(event) => setSessionFilter(event.target.value)}
+                      aria-label="Filtrar sessões por pesquisador ou arquivo"
+                    />
+                  </label>
+                  <button onClick={() => void refreshSavedSessions()} title="Atualizar sessões">
+                    <RefreshCw size={13} />
+                  </button>
+                </div>
               </div>
               <div className="batch-list">
-                {savedSessions.map((session) => (
+                {filteredSavedSessions.map((session) => (
                   <button
                     key={session.session_id}
                     className={`batch-item ${session.session_id === result?.session_id ? "selected" : ""}`}
@@ -895,11 +986,15 @@ export default function App() {
                   >
                     <span className={`pair-status ${session.status === "ready" ? "ready" : "error"}`} />
                     <span className="pair-name">
-                      {session.source_name} · rev. {session.revision}
+                      <strong>{session.source_name} · rev. {session.revision}</strong>
+                      <small>{session.reviewer}</small>
                     </span>
                     <ChevronRight size={13} />
                   </button>
                 ))}
+                {!filteredSavedSessions.length ? (
+                  <p className="empty-session-list">Nenhuma sessão encontrada.</p>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -1267,6 +1362,43 @@ export default function App() {
           <AlertTriangle size={15} /> {error}
         </button>
       )}
+      {!reviewerConfirmed ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="app-modal identity-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reviewer-modal-title"
+          >
+            <span className="modal-icon"><Microscope size={21} /></span>
+            <h2 id="reviewer-modal-title">Identificação do pesquisador</h2>
+            <p>
+              Informe quem realizará esta revisão. O nome acompanhará a criação,
+              o processamento e cada alteração registrada na auditoria.
+            </p>
+            <form className="identity-form" onSubmit={confirmReviewer}>
+              <label>
+                Nome completo
+                <input
+                  autoFocus
+                  value={reviewerDraft}
+                  maxLength={120}
+                  placeholder="Ex.: Maria Silva"
+                  onChange={(event) => setReviewerDraft(event.target.value)}
+                />
+              </label>
+              <small>
+                O último nome usado apenas preenche este formulário neste navegador.
+              </small>
+              <div className="modal-actions">
+                <button className="primary" type="submit" disabled={!reviewerDraft.trim()}>
+                  Iniciar revisão
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
       {dialog && (
         <div className="modal-backdrop" role="presentation">
           <section className="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">

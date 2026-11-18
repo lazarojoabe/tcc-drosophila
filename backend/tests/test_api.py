@@ -45,7 +45,8 @@ class ApiTests(unittest.TestCase):
                         data={
                             "config_json": json.dumps(
                                 {"min_nucleus_area": 20, "protein_channel": 0}
-                            )
+                            ),
+                            "reviewer": "Pesquisadora API",
                         },
                         files={
                             "nucleus_file": (
@@ -89,7 +90,9 @@ class ApiTests(unittest.TestCase):
                     self.assertEqual(sessions.json()[0]["session_id"], session["session_id"])
                     audit = client.get(f"/api/sessions/{session['session_id']}/history")
                     self.assertEqual(audit.status_code, 200, audit.text)
+                    self.assertEqual(audit.json()[0]["reviewer"], "Pesquisadora API")
                     self.assertEqual(audit.json()[-1]["operation"], "exclude")
+                    self.assertEqual(audit.json()[-1]["reviewer"], "Pesquisadora API")
                     conflict = client.post(
                         f"/api/sessions/{session['session_id']}/edits",
                         json={

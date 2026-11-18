@@ -37,6 +37,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def normalize_reviewer(reviewer: str | None) -> str:
+    """Normaliza a identificação registrada na trilha de auditoria."""
+
+    return reviewer.strip() if reviewer and reviewer.strip() else "Não informado"
+
+
 @dataclass
 class Job:
     job_id: str
@@ -54,6 +60,7 @@ class SessionState:
     config: SegmentationConfig
     warnings: list[str]
     descriptors: list[ImageDescriptor]
+    reviewer: str = "Não informado"
     nucleus_image: np.ndarray | None = None
     protein_image: np.ndarray | None = None
     labels: np.ndarray | None = None
@@ -105,6 +112,7 @@ class SessionManager:
         protein_data: bytes,
         protein_name: str,
         config: SegmentationConfig,
+        reviewer: str | None = None,
     ) -> SessionState:
         nucleus_name = safe_filename(nucleus_name, "nuclei.tif")
         protein_name = safe_filename(protein_name, "protein.tif")
@@ -165,6 +173,7 @@ class SessionManager:
                     derived=protein_info.derived,
                 ),
             ],
+            reviewer=normalize_reviewer(reviewer),
             input_files={"nucleus": nucleus_name, "protein": protein_name},
         )
         job = Job(job_id, session_id)
@@ -177,6 +186,7 @@ class SessionManager:
             state,
             "session_created",
             {"input_files": state.input_files, "source": "upload"},
+            state.reviewer,
         )
         self._emit(session_id, job)
         self.executor.submit(self._run_job, state, job, nucleus_image, protein_image)
@@ -187,6 +197,7 @@ class SessionManager:
         nuclei: list[tuple[bytes, str]],
         proteins: list[tuple[bytes, str]],
         config: SegmentationConfig,
+        reviewer: str | None = None,
     ) -> BatchState:
         """Pareia duas pastas pelo nome normalizado e inicia uma sessão por par."""
 
@@ -210,7 +221,12 @@ class SessionManager:
             if nucleus and protein:
                 try:
                     session = self.create_session(
-                        nucleus[0], nucleus[1], protein[0], protein[1], config
+                        nucleus[0],
+                        nucleus[1],
+                        protein[0],
+                        protein[1],
+                        config,
+                        reviewer,
                     )
                     pair["session_id"], pair["job_id"] = (
                         session.session_id,
@@ -669,6 +685,7 @@ class SessionManager:
                 "nuclei": state.nuclei,
                 "aggregate": state.aggregate,
                 "job_id": state.job_id,
+                "reviewer": state.reviewer,
             }
 
     def export_csv(self, session_id: str) -> bytes:
@@ -800,7 +817,9 @@ class SessionManager:
                     "nuclei.csv: métricas tabulares por núcleo (sem o polígono).\n"
                     "audit.jsonl: trilha de auditoria das operações realizadas.\n"
                     "histograms/: histogramas PNG individuais da sessão.\n"
-                    "images/: prévias normalizadas, máscara e sobreposição de revisão.\n"
+                    "images/mask.png: máscara atual, reconstruída após as revisões.\n"
+                    "images/initial-segmentation-mask.png: máscara antes da revisão manual.\n"
+                    "images/: prévias normalizadas e sobreposições para auditoria.\n"
                     "original/: arquivos originais usados na análise.\n"
                     "revisions/: fotografias imutáveis de cada revisão persistida.\n"
                 ),
@@ -843,6 +862,10 @@ class SessionManager:
                         ),
                     )
                 if state.labels is not None:
+                    archive.writestr(
+                        "images/initial-segmentation-mask.png",
+                        mask_png(state.labels),
+                    )
                     archive.writestr(
                         "images/review-mask.png",
                         review_mask_png(state.labels.shape[:2], state.nuclei),
@@ -901,7 +924,7 @@ class SessionManager:
             if kind == "protein" and state.protein_image is not None:
                 return preview_png(state.protein_image, state.config.protein_channel)
             if kind == "mask" and state.labels is not None:
-                return mask_png(state.labels)
+                return review_mask_png(state.labels.shape[:2], state.nuclei)
         raise ValueError("Imagem ainda não disponível")
 
     def _check_revision(self, state: SessionState, base_revision: int) -> None:
@@ -942,6 +965,7 @@ class SessionManager:
             "nuclei": state.nuclei,
             "aggregate": state.aggregate,
             "job_id": state.job_id,
+            "reviewer": state.reviewer,
         }
         payload = {
             "schema_version": 1,
@@ -973,7 +997,7 @@ class SessionManager:
                 "timestamp": utc_now(),
                 "revision": state.revision,
                 "operation": operation,
-                "reviewer": reviewer.strip() if reviewer and reviewer.strip() else "Não informado",
+                "reviewer": normalize_reviewer(reviewer or state.reviewer),
                 "details": details,
             },
         )
@@ -1019,6 +1043,7 @@ class SessionManager:
                     "updated_at": updated_at,
                     "source_name": state.descriptors[0].name if state.descriptors else "Amostra sem nome",
                     "nucleus_count": state.aggregate.get("nucleus_count"),
+                    "reviewer": state.reviewer,
                 }
             )
         return sorted(entries, key=lambda item: item["updated_at"], reverse=True)
@@ -1050,6 +1075,7 @@ class SessionManager:
                         ImageDescriptor(**item)
                         for item in payload.get("descriptors", [])
                     ],
+                    reviewer=normalize_reviewer(result.get("reviewer")),
                     nucleus_image=nucleus_image,
                     protein_image=protein_image,
                     labels=labels,

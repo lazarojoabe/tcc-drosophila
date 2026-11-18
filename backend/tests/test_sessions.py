@@ -89,6 +89,7 @@ class SessionTests(unittest.TestCase):
                 encode(protein),
                 "protein.png",
                 SegmentationConfig(min_nucleus_area=20, protein_channel=0),
+                reviewer="Pesquisadora de origem",
             )
             manager.executor.shutdown(wait=True)
             manager.apply_edit(
@@ -103,6 +104,7 @@ class SessionTests(unittest.TestCase):
             restored = SessionManager(directory)
             result = restored.result(state.session_id)
             self.assertEqual(result["revision"], 1)
+            self.assertEqual(result["reviewer"], "Pesquisadora de origem")
             self.assertEqual(result["nuclei"][0]["state"], "hidden")
             history = restored.audit_history(state.session_id)
             self.assertEqual(history[-1]["reviewer"], "Pesquisadora teste")
@@ -124,6 +126,7 @@ class SessionTests(unittest.TestCase):
                     "images/nucleus.png",
                     "images/protein.png",
                     "images/mask.png",
+                    "images/initial-segmentation-mask.png",
                     "images/review-overlay.png",
                     "images/protein-review-overlay.png",
                     "images/review-mask.png",
@@ -169,6 +172,23 @@ class SessionTests(unittest.TestCase):
                 EditRequest(operation="exclude", nucleus_ids=[1], base_revision=0),
             )
             self.assertEqual(changed["aggregate"]["nucleus_count"], 0)
+            package = manager.export_package(state.session_id)
+            with zipfile.ZipFile(io.BytesIO(package)) as archive:
+                reviewed_mask = cv2.imdecode(
+                    np.frombuffer(archive.read("images/mask.png"), dtype=np.uint8),
+                    cv2.IMREAD_GRAYSCALE,
+                )
+                initial_mask = cv2.imdecode(
+                    np.frombuffer(
+                        archive.read("images/initial-segmentation-mask.png"),
+                        dtype=np.uint8,
+                    ),
+                    cv2.IMREAD_GRAYSCALE,
+                )
+            self.assertIsNotNone(reviewed_mask)
+            self.assertIsNotNone(initial_mask)
+            self.assertEqual(int(np.count_nonzero(reviewed_mask)), 0)
+            self.assertGreater(int(np.count_nonzero(initial_mask)), 0)
             restored = manager.apply_edit(
                 state.session_id,
                 EditRequest(operation="restore", nucleus_ids=[1], base_revision=1),
