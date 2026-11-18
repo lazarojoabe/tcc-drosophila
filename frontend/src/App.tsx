@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -48,7 +48,16 @@ import { SessionHistogram } from "./components/SessionHistogram";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { NucleiTable } from "./components/NucleiTable";
 import { AuditTrail } from "./components/AuditTrail";
-import type { AuditEntry, Batch, BatchPair, Config, Job, Result, SavedSession } from "./types";
+import type {
+  AuditEntry,
+  Batch,
+  BatchPair,
+  Config,
+  Job,
+  Result,
+  SavedSession,
+  SelectionModifiers,
+} from "./types";
 
 const defaults: Config = {
   nucleus_channel: 0,
@@ -70,6 +79,27 @@ type DialogState = {
   confirmLabel?: string;
   onConfirm?: () => void;
 };
+type ScrollSnapshot = {
+  windowX: number;
+  windowY: number;
+  elements: Array<{ element: HTMLElement; left: number; top: number }>;
+};
+
+function captureScroll(): ScrollSnapshot {
+  return {
+    windowX: window.scrollX,
+    windowY: window.scrollY,
+    elements: Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".control-rail, .analysis-main, .panel.right, .table-wrap, .table-panel, .audit-trail",
+      ),
+    ).map((element) => ({
+      element,
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    })),
+  };
+}
 const imageExtensions = /\.(tif|tiff|png|jpe?g)$/i;
 function imageFiles(files: FileList | null): File[] {
   return Array.from(files ?? []).filter((file) =>
@@ -117,6 +147,7 @@ export default function App() {
   const [job, setJob] = useState<Job>();
   const [batch, setBatch] = useState<Batch>();
   const [selected, setSelected] = useState<number[]>([]);
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [layer, setLayer] = useState<"nucleus" | "protein" | "mask">("protein");
   const [labels, setLabels] = useState(true);
   const [editId, setEditId] = useState<number | null>(null);
@@ -134,6 +165,7 @@ export default function App() {
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
+  const pendingScroll = useRef<ScrollSnapshot | null>(null);
   const selectedNucleus = result?.nuclei.find(
     (nucleus) => nucleus.nucleus_id === selected[0],
   );
@@ -149,6 +181,64 @@ export default function App() {
     job?.status === "running" ||
     batch?.status === "queued" ||
     batch?.status === "running";
+
+  useLayoutEffect(() => {
+    const snapshot = pendingScroll.current;
+    if (!snapshot) return;
+    window.scrollTo(snapshot.windowX, snapshot.windowY);
+    snapshot.elements.forEach(({ element, left, top }) => {
+      if (!element.isConnected) return;
+      element.scrollLeft = left;
+      element.scrollTop = top;
+    });
+    pendingScroll.current = null;
+  }, [result]);
+
+  function commitResult(next: Result) {
+    pendingScroll.current = captureScroll();
+    setResult(next);
+  }
+
+  function selectNucleus(
+    id: number,
+    modifiers: SelectionModifiers,
+    items: typeof visibleNuclei = visibleNuclei,
+  ) {
+    const ids = items.map((nucleus) => nucleus.nucleus_id);
+    setSelected((current) => {
+      if (modifiers.range) {
+        const anchor = selectionAnchor ?? current[0] ?? id;
+        const anchorIndex = ids.indexOf(anchor);
+        const targetIndex = ids.indexOf(id);
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const start = Math.min(anchorIndex, targetIndex);
+          const end = Math.max(anchorIndex, targetIndex);
+          const range = ids.slice(start, end + 1);
+          return modifiers.additive
+            ? [...new Set([...current, ...range])]
+            : range;
+        }
+      }
+      if (modifiers.additive) {
+        return current.includes(id)
+          ? current.filter((value) => value !== id)
+          : [...current, id];
+      }
+      return [id];
+    });
+    setSelectionAnchor(id);
+  }
+
+  function selectAll(ids: number[]) {
+    if (!ids.length) return;
+    setSelected((current) => {
+      const allSelected = ids.every((id) => current.includes(id));
+      return allSelected
+        ? current.filter((id) => !ids.includes(id))
+        : [...new Set([...current, ...ids])];
+    });
+    setSelectionAnchor(ids[0]);
+  }
 
   useEffect(() => {
     if (!batch || ["completed", "error"].includes(batch.status)) return;
@@ -258,6 +348,7 @@ export default function App() {
     try {
       setResult(await getResult(pair.session_id));
       setSelected([]);
+      setSelectionAnchor(null);
       setEditId(null);
       setShowHistogram(false);
       setShowHistory(true);
@@ -281,6 +372,7 @@ export default function App() {
       setJob(undefined);
       setResult(await getResult(session.session_id));
       setSelected([]);
+      setSelectionAnchor(null);
       setEditId(null);
       setShowHistogram(false);
       setShowHistory(true);
@@ -291,7 +383,7 @@ export default function App() {
   async function refresh(id = result?.session_id) {
     if (!id) return;
     try {
-      setResult(await getResult(id));
+      commitResult(await getResult(id));
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Falha ao atualizar a amostra",
@@ -300,8 +392,9 @@ export default function App() {
   }
   async function apply(operation: "hide" | "exclude" | "restore") {
     if (!result || !selected.length) return;
+    const affectedIds = new Set(selected);
     try {
-      setResult(
+      commitResult(
         await edit(result.session_id, {
           operation,
           nucleus_ids: selected,
@@ -309,6 +402,12 @@ export default function App() {
           reviewer,
         }),
       );
+      if (operation === "exclude") {
+        setSelected((current) =>
+          current.filter((nucleusId) => !affectedIds.has(nucleusId)),
+        );
+        setSelectionAnchor(null);
+      }
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Falha ao aplicar a alteração",
@@ -319,7 +418,7 @@ export default function App() {
   async function historyAction(action: typeof undo) {
     if (!result) return;
     try {
-      setResult(await action(result.session_id, result.revision, reviewer));
+      commitResult(await action(result.session_id, result.revision, reviewer));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Falha no histórico");
     }
@@ -369,7 +468,7 @@ export default function App() {
       }
       if (!result) return;
       const saved = await saveSession(result.session_id, reviewer);
-      setResult(saved);
+      commitResult(saved);
       const link = document.createElement("a");
       link.href = exportUrl(saved.session_id, "zip");
       link.download = `nuclei-analysis-${saved.session_id}.zip`;
@@ -447,7 +546,7 @@ export default function App() {
       return;
     }
     try {
-      setResult(
+      commitResult(
         await edit(result.session_id, {
           operation: "edit_contour",
           nucleus_id: editId,
@@ -776,20 +875,6 @@ export default function App() {
                 }
               />
             </label>
-            <label>
-              Faixa de fundo
-              <input
-                type="number"
-                min="1"
-                value={config.background_border_width}
-                onChange={(event) =>
-                  setConfig({
-                    ...config,
-                    background_border_width: Number(event.target.value),
-                  })
-                }
-              />
-            </label>
           </section>
           {savedSessions.length ? (
             <section className="batch-section saved-sessions">
@@ -996,13 +1081,16 @@ export default function App() {
                 editId={editId}
                 editMode={editMode}
                 redrawVersion={redrawVersion}
-                onSelect={(id, multi) =>
-                  setSelected(
-                    multi
-                      ? selected.includes(id)
-                        ? selected.filter((value) => value !== id)
-                        : [...selected, id]
-                      : [id],
+                onSelect={(id, modifiers) =>
+                  selectNucleus(
+                    id,
+                    {
+                      // Na imagem não há uma ordem linear perceptível: Shift
+                      // deve apenas compor a seleção, sem incluir IDs intermediários.
+                      additive: modifiers.additive || modifiers.range,
+                      range: false,
+                    },
+                    result?.nuclei ?? [],
                   )
                 }
                 onEditChange={setEditPolygon}
@@ -1070,13 +1158,44 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                <div className="selection-bar">
+                  <span className="selection-count">
+                    {selected.length
+                      ? `${selected.length} núcleo${selected.length === 1 ? "" : "s"} selecionado${selected.length === 1 ? "" : "s"}`
+                      : "Selecione por caixa, Ctrl/Cmd ou Shift"}
+                  </span>
+                  <div className="bulk-actions">
+                    <button
+                      className="danger"
+                      onClick={() => void apply("exclude")}
+                      disabled={!selected.length}
+                    >
+                      Excluir selecionados
+                    </button>
+                    <button
+                      onClick={() => void apply("restore")}
+                      disabled={!selected.length}
+                    >
+                      Restaurar selecionados
+                    </button>
+                    {selected.length ? (
+                      <button
+                        onClick={() => {
+                          setSelected([]);
+                          setSelectionAnchor(null);
+                        }}
+                      >
+                        Limpar
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
                 <NucleiTable
                   compact
                   nuclei={visibleNuclei}
                   selected={selected}
-                  onSelect={(id, multi) =>
-                    setSelected(multi ? [...new Set([...selected, id])] : [id])
-                  }
+                  onSelect={(id, modifiers) => selectNucleus(id, modifiers)}
+                  onSelectAll={selectAll}
                 />
               </section>
             </div>

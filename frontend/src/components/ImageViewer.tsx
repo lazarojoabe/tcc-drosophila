@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { imageUrl } from "../api";
-import type { Nucleus } from "../types";
+import type { Nucleus, SelectionModifiers } from "../types";
 import {
   imageToScreen,
   pointInPolygon,
@@ -20,7 +20,7 @@ interface Props {
   editId: number | null;
   editMode: "adjust" | "redraw";
   redrawVersion: number;
-  onSelect: (id: number, multi: boolean) => void;
+  onSelect: (id: number, modifiers: SelectionModifiers) => void;
   onEditChange: (polygon: Point[]) => void;
 }
 const MIN_SCALE = 0.1;
@@ -102,7 +102,7 @@ export function ImageViewer({
         imageRef.current.height * transform.scale,
       );
     nuclei
-      .filter((n) => n.state !== "excluded" || selected.includes(n.nucleus_id))
+      .filter((n) => n.state !== "excluded")
       .forEach((n) => {
         const polygon =
           n.nucleus_id === editId && editingPolygon
@@ -310,7 +310,12 @@ export function ImageViewer({
     const nucleus = [...nuclei]
       .reverse()
       .find((n) => n.state !== "excluded" && pointInPolygon(point, n.polygon));
-    if (nucleus) onSelect(nucleus.nucleus_id, event.ctrlKey || event.shiftKey);
+    if (nucleus) {
+      onSelect(nucleus.nucleus_id, {
+        additive: event.ctrlKey || event.metaKey,
+        range: event.shiftKey,
+      });
+    }
   }
   function doubleClick(event: React.MouseEvent<HTMLCanvasElement>) {
     if (!editingPolygon || editMode === "redraw") return;

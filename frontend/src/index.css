@@ -795,6 +795,43 @@ h4 {
   padding: 11px 14px;
   border-bottom: 1px solid #d8e0e6;
 }
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px;
+  color: #7c8f9b;
+  border-bottom: 1px solid #e5ebee;
+  background: #f5f9fa;
+  font-size: 9px;
+}
+.selection-count {
+  white-space: nowrap;
+}
+.bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.bulk-actions button {
+  padding: 4px 6px;
+  font-size: 9px;
+}
+.selection-cell {
+  width: 27px;
+  padding-right: 2px !important;
+  padding-left: 9px !important;
+  text-align: center;
+}
+.selection-checkbox {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: #2f788c;
+  cursor: pointer;
+}
 .table-header > div:first-child strong {
   display: block;
   margin-top: 4px;
@@ -1375,6 +1412,13 @@ tbody tr:hover,
   .layer-switcher,
   .table-tools {
     flex-wrap: wrap;
+  }
+  .selection-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .bulk-actions {
+    justify-content: flex-start;
   }
   .session-summary-body,
   .batch-summary-body,

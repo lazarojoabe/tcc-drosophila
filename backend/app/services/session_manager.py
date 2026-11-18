@@ -324,6 +324,7 @@ class SessionManager:
     def _batch_summary(self, batch: BatchState) -> dict[str, Any]:
         nucleus_counts: list[dict[str, Any]] = []
         protein_std_values: list[dict[str, Any]] = []
+        protein_intensities: list[float] = []
         corrected_intensities: list[float] = []
         nucleus_intensities: list[float] = []
         intranuclear_standard_deviations: list[float] = []
@@ -339,6 +340,12 @@ class SessionManager:
                     {"key": pair["key"], "value": float(metrics["std_protein"])}
                 )
             state = self.get(pair["session_id"])
+            protein_intensities.extend(
+                float(item["protein_mean"])
+                for item in state.nuclei
+                if item.get("state") != "excluded"
+                and item.get("protein_mean") is not None
+            )
             corrected_intensities.extend(
                 float(item["protein_mean_background_corrected"])
                 for item in state.nuclei
@@ -359,7 +366,13 @@ class SessionManager:
             )
         return {
             "images_processed": len(nucleus_counts),
-            "nuclei_analyzed": len(corrected_intensities),
+            "nuclei_analyzed": len(protein_intensities),
+            "mean_protein": (
+                float(np.mean(protein_intensities)) if protein_intensities else None
+            ),
+            "std_protein": (
+                float(np.std(protein_intensities)) if protein_intensities else None
+            ),
             "mean_corrected_protein": (
                 float(np.mean(corrected_intensities)) if corrected_intensities else None
             ),
@@ -411,13 +424,11 @@ class SessionManager:
                 "Nucleos detectados por imagem",
             )
         if kind == "protein":
-            values = self._batch_histogram_values(
-                batch, "protein_mean_background_corrected"
-            )
+            values = self._batch_histogram_values(batch, "protein_mean")
             return distribution_histogram_png(
                 values,
-                "Distribuição da intensidade proteica corrigida no lote",
-                "Intensidade média da proteína corrigida pelo fundo",
+                "Distribuição da intensidade proteica no lote",
+                "Intensidade média da proteína",
             )
         if kind == "nucleus":
             values = self._batch_histogram_values(batch, "nucleus_mean")
@@ -855,9 +866,9 @@ class SessionManager:
         state = self.get(session_id)
         specifications = {
             "protein": (
-                "protein_mean_background_corrected",
-                "Distribuição da intensidade proteica corrigida por núcleo",
-                "Intensidade média da proteína corrigida pelo fundo",
+                "protein_mean",
+                "Distribuição da intensidade proteica por núcleo",
+                "Intensidade média da proteína",
             ),
             "nucleus": (
                 "nucleus_mean",

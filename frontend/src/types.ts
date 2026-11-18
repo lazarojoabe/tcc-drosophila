@@ -1,5 +1,11 @@
 export type NucleusState = "active" | "hidden" | "excluded";
 
+/** Modificadores usados para seleção por clique na imagem e na tabela. */
+export interface SelectionModifiers {
+  additive: boolean;
+  range: boolean;
+}
+
 export interface Nucleus {
   nucleus_id: number;
   area_px: number;
@@ -128,6 +134,8 @@ export interface BatchPair {
 export interface BatchSummary {
   images_processed: number;
   nuclei_analyzed: number;
+  mean_protein: number | null;
+  std_protein: number | null;
   mean_corrected_protein: number | null;
   std_corrected_protein: number | null;
   mean_nucleus_intensity: number | null;

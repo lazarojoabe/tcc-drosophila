@@ -10,8 +10,8 @@ interface Props {
 
 const options: Record<HistogramKind, { title: string; description: string }> = {
   protein: {
-    title: "Intensidade proteica corrigida por núcleo",
-    description: "A intensidade média da proteína é corrigida pelo sinal de fundo.",
+    title: "Intensidade proteica por núcleo",
+    description: "A distribuição usa a intensidade média do canal proteico em cada núcleo.",
   },
   nucleus: {
     title: "Intensidade nuclear por núcleo",
@@ -33,8 +33,8 @@ export function SessionHistogram({ result, histogramUrl, context = "amostra indi
   const statistics =
     kind === "protein"
       ? {
-          meanLabel: "Média corrigida",
-          mean: result.aggregate.mean_protein_background_corrected,
+          meanLabel: "Intensidade média proteica",
+          mean: result.aggregate.mean_protein,
           deviationLabel: "DP entre núcleos",
           deviation: result.aggregate.std_protein_background_corrected,
         }

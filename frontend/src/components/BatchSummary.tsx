@@ -11,9 +11,9 @@ interface Props {
 
 const options: Record<HistogramKind, { title: string; description: string }> = {
   protein: {
-    title: "Intensidade proteica corrigida",
+    title: "Intensidade proteica",
     description:
-      "Reúne a intensidade média corrigida de todos os núcleos de todas as imagens concluídas.",
+      "Reúne a intensidade média de todos os núcleos de todas as imagens concluídas.",
   },
   nucleus: {
     title: "Intensidade nuclear",
@@ -38,8 +38,8 @@ export function BatchSummary({ batch, histogramUrl, csvUrl, packageUrl }: Props)
   const statistics =
     kind === "protein"
       ? {
-          meanLabel: "Intensidade média corrigida",
-          mean: summary?.mean_corrected_protein,
+          meanLabel: "Intensidade média proteica",
+          mean: summary?.mean_protein,
           deviationLabel: "DP entre núcleos",
           deviation: summary?.std_corrected_protein,
         }

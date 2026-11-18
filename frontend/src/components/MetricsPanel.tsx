@@ -51,12 +51,12 @@ export function MetricsPanel({
           <h4>Quantificação principal</h4>
           <div className="metrics-grid">
             <Value
-              label="Média proteica corrigida"
-              value={aggregate.mean_protein_background_corrected}
+              label="Média proteica"
+              value={aggregate.mean_protein}
             />
             <Value
               label="DP entre núcleos"
-              value={aggregate.std_protein_background_corrected}
+              value={aggregate.std_protein}
             />
             <Value label="Núcleos ocultos" value={aggregate.hidden_count} />
             <Value label="Núcleos excluídos" value={aggregate.excluded_count} />
@@ -128,16 +128,14 @@ export function MetricsPanel({
           </div>
           <h4>Quantificação individual</h4>
           <div className="metrics-grid">
-            <Value label="Proteína corrigida" value={nucleus.protein_mean_background_corrected} />
             <Value label="Sinal bruto médio" value={nucleus.protein_mean} />
             <Value
               label="Sinal integrado"
               value={nucleus.protein_integrated}
             />
-            <Value label="Fundo" value={nucleus.background_mean} />
             <Value
-              label="Prot. corrigida"
-              value={nucleus.protein_mean_background_corrected}
+              label="DP intranuclear"
+              value={nucleus.protein_std}
             />
           </div>
         </>
